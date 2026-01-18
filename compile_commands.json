@@ -1,0 +1,23 @@
+[
+  {
+    "file": "main.c",
+    "arguments": [
+      "cc",
+      "-c",
+      "main.c",
+      "-g",
+      "-Werror",
+      "-DWLR_USE_UNSTABLE",
+      "-DXWAYLAND",
+      "-I/usr/include/wlroots-0.20",
+      "-I/usr/include/pixman-1",
+      "-I/usr/include/libdrm",
+      "-I/usr/src/debug/wlroots-asan-git/build/protocol",
+      "-fsanitize=address",
+      "-o",
+      "main.o"
+    ],
+    "directory": "/home/wdkaza/code/untitled",
+    "output": "main.o"
+  }
+]

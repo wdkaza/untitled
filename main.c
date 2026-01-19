@@ -71,7 +71,10 @@
 #include <xcb/xcb.h>
 #include <xcb/xcb_icccm.h>
 #endif
-#include "config.h"
+
+#define CLEANMASK(mask)         (mask & ~WLR_MODIFIER_CAPS)
+#define END(A)                  ((A) + LENGTH(A))
+#define LENGTH(X)               (sizeof X / sizeof X[0])
 
 enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize};
 enum { XDGShell, LayerShell, X11 };
@@ -131,6 +134,20 @@ struct Client{
 };
 /* struct Popup{}; */
 
+typedef union{
+  int i;
+  float f;
+  const void *v;
+}Arg;
+
+typedef struct{
+	uint32_t mod;
+	xkb_keysym_t keysym;
+	void (*func)(const Arg *);
+	const Arg arg;
+}Key;
+
+
 struct Keyboard{
   struct wl_list link;
   struct wlr_keyboard *wlr_keyboard;
@@ -158,6 +175,29 @@ struct LayerSurface{
   struct wl_listener destroy;
 };
 
+static void cursormotion(struct wl_listener *listener, void *data);
+static void seatsetselection(struct wl_listener *listener, void *data);
+static void seatrequestcursor(struct wl_listener *listener, void *data);
+static void cursormotionabsolute(struct wl_listener *listener, void *data);
+static void cursoraxis(struct wl_listener *listener, void *data);
+static void cursorframe(struct wl_listener *listener, void *data);
+static void cursorbutton(struct wl_listener *listener, void *data);
+static void rendermon(struct wl_listener *listener, void *data);
+static void requeststatemon(struct wl_listener *listener, void *data);
+static void destroymon(struct wl_listener *listener, void *data);
+static void createmon(struct wl_listener *listener, void *data);
+static void createinput(struct wl_listener *listener, void *data);
+static void newclient(struct wl_listener *listener, void *data);
+static void newdecoration(struct wl_listener *listener, void *data);
+static void decoration_set_mode(struct wl_listener *listener, void *data);
+static void decoration_destroy(struct wl_listener *listener, void *data);
+static void seatsetprimaryselection(struct wl_listener *listener, void *data);
+static void createkeyboard(struct wlr_input_device *device);
+static void createpointer(struct wlr_input_device *device);
+static void processcursormotion(uint32_t time);
+static void setfocus(struct Client *client);
+static void cursormove();
+static void cursorresize();
 static void init();
 static void run();
 static void quit();
@@ -177,6 +217,20 @@ static void destroylisteners();
 //static struct wl_listener xwayland_ready = {.notify = xwaylandready};
 static struct wlr_xwayland *xwayland;
 #endif
+
+static struct wl_listener new_output = {.notify = createmon};
+static struct wl_listener cursor_motion = {.notify = cursormotion};
+static struct wl_listener cursor_motion_absolute = {.notify = cursormotionabsolute};
+static struct wl_listener cursor_axis = {.notify = cursoraxis};
+static struct wl_listener cursor_button = {.notify = cursorbutton};
+static struct wl_listener cursor_frame = {.notify = cursorframe};
+static struct wl_listener request_set_selection = {.notify = seatsetselection};
+static struct wl_listener request_set_primary_selection = {.notify = seatsetprimaryselection};
+static struct wl_listener request_cursor = {.notify = seatrequestcursor};
+static struct wl_listener new_decoration = {.notify = newdecoration};
+static struct wl_listener new_input = {.notify = createinput};
+//static struct wl_listener new_input = {.notify = createinput};
+//static struct wl_listener new_client = {.notify = newclient};
 
 
 static struct wl_display *display;
@@ -212,6 +266,320 @@ static struct wl_list keyboards;
 static uint32_t current_desktop;
 struct Monitor *current_monitor;
 
+#include "config.h"
+
+void seatsetprimaryselection(struct wl_listener *listener, void *data){
+  struct wlr_seat_request_set_primary_selection_event *event = data;
+  wlr_seat_set_primary_selection(seat, event->source, event->serial);
+}
+
+void seatsetselection(struct wl_listener *listener, void *data){
+  struct wlr_seat_request_set_selection_event *event = data; 
+  wlr_seat_set_selection(seat, event->source, event->serial);
+}
+
+void seatrequestcursor(struct wl_listener *listener, void *data){
+  struct wlr_seat_pointer_request_set_cursor_event *event = data;
+  struct wlr_seat_client *focused_client = seat->pointer_state.focused_client;
+  if(focused_client == event->seat_client){
+    wlr_cursor_set_surface(cursor, event->surface, event->hotspot_x, event->hotspot_y);
+  }
+}
+
+void decoration_set_mode(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, decoration_set_mode);
+  if(client->surface.xdg->initialized){
+    wlr_xdg_toplevel_decoration_v1_set_mode(client->decoration, WLR_XDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+  }
+}
+
+void decoration_destroy(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, decoration_destroy);
+  wl_list_remove(&client->decoration_destroy.link);
+  wl_list_remove(&client->decoration_set_mode.link);
+}
+
+void newdecoration(struct wl_listener *listener, void *data){
+  struct wlr_xdg_toplevel_decoration_v1 *decoration = data; 
+  struct wlr_xdg_toplevel *toplevel = decoration->toplevel;
+  struct wlr_scene_tree *scene_tree = toplevel->base->data;
+  struct Client *client = scene_tree->node.data;
+
+  client->decoration = decoration;
+  client->decoration_set_mode.notify = decoration_set_mode;
+  wl_signal_add(&client->decoration->events.request_mode, &client->decoration_set_mode);
+  client->decoration_destroy.notify = decoration_destroy;
+  wl_signal_add(&client->decoration->events.destroy, &client->decoration_destroy);
+}
+
+void rendermon(struct wl_listener *listener, void *data){
+  struct Monitor *mon = wl_container_of(listener, mon, frame);  
+  struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(scene, mon->wlr_output);
+
+  wlr_scene_output_commit(scene_output, NULL);
+  
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  wlr_scene_output_send_frame_done(scene_output, &now);
+}
+
+void requeststatemon(struct wl_listener *listener, void *data){
+  struct Monitor *mon = wl_container_of(listener, mon, request_state);
+  struct wlr_output_event_request_state *event = data;
+  wlr_output_commit_state(mon->wlr_output, event->state);
+}
+
+void destroymon(struct wl_listener *listener, void *data){
+  struct Monitor *mon = wl_container_of(listener, mon, destroy);
+  wl_list_remove(&mon->request_state.link);
+  wl_list_remove(&mon->frame.link);
+  wl_list_remove(&mon->destroy.link);
+  wl_list_remove(&mon->link);
+  free(mon);
+}
+
+void createmon(struct wl_listener *listener, void *data){
+  struct wlr_output *wlr_output = data;
+  struct Monitor *mon;
+  struct wlr_output_state state;
+  
+  wlr_output_init_render(wlr_output, allocator, renderer);
+  
+  wlr_output_state_init(&state);
+  wlr_output_state_set_enabled(&state, true);
+  wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
+  
+  wlr_output_commit_state(wlr_output, &state);
+  wlr_output_state_finish(&state);
+
+  mon = calloc(1, sizeof(*mon));
+  mon->wlr_output = wlr_output;
+  wlr_output->data = mon;
+  mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
+  mon->frame.notify = rendermon; 
+  wl_signal_add(&wlr_output->events.frame, &mon->frame);
+  mon->request_state.notify = requeststatemon;
+  wl_signal_add(&wlr_output->events.request_state, &mon->request_state);
+  mon->destroy.notify = destroymon;
+  wl_signal_add(&wlr_output->events.destroy, &mon->destroy);
+
+  /*
+  for(size_t i = 0; i < 4; i++){
+    wl_list_init(&mon->layers[i]);
+  }
+  */
+
+  wl_list_insert(&mons, &mon->link); 
+
+  wlr_output_layout_add_auto(output_layout, wlr_output);
+  current_monitor = mon;
+}
+
+
+// from dwl
+bool keybinding(uint32_t mods, xkb_keysym_t sym)
+{
+	const Key *k;
+	for (k = keys; k < END(keys); k++) {
+		if (CLEANMASK(mods) == CLEANMASK(k->mod)
+				&& xkb_keysym_to_lower(sym) == xkb_keysym_to_lower(k->keysym)
+				&& k->func) {
+			k->func(&k->arg);
+			return 1;
+		}
+	}
+	return 0;
+}
+
+
+
+void keyboardmodifiers(struct wl_listener *listener, void *data){
+  struct Keyboard *keyboard = wl_container_of(listener, keyboard, modifier);
+  wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
+  wlr_seat_keyboard_notify_modifiers(seat, &keyboard->wlr_keyboard->modifiers);
+}
+
+void keyboardkey(struct wl_listener *listener, void *data){
+  struct Keyboard *keyboard = wl_container_of(listener, keyboard, key);
+  struct wlr_keyboard_key_event *event = data;
+
+  uint32_t keycode = event->keycode + 8;
+  const xkb_keysym_t *syms;
+  int nsyms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
+  bool handled = false;
+  uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
+  if((modifiers & WLR_MODIFIER_ALT) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED){
+    for(int i = 0; i < nsyms; i++){
+      handled = keybinding(modifiers, syms[i]);
+    }
+  } 
+  if(!handled){
+    wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
+    wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
+  }
+}
+
+void keyboardremove(struct wl_listener *listener, void *data){
+  struct Keyboard *keyboard = wl_container_of(listener, keyboard, destroy);
+  wl_list_remove(&keyboard->modifier.link);
+  wl_list_remove(&keyboard->key.link);
+  wl_list_remove(&keyboard->destroy.link);
+  free(keyboard);
+}
+
+void createkeyboard(struct wlr_input_device *device){
+  struct wlr_keyboard *wlr_keyboard = wlr_keyboard_from_input_device(device);
+  struct Keyboard *keyboard = calloc(1, sizeof(*keyboard));
+  keyboard->wlr_keyboard = wlr_keyboard;
+  struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+  struct xkb_keymap *keymap = xkb_keymap_new_from_names(context, NULL, XKB_KEYMAP_COMPILE_NO_FLAGS);
+  wlr_keyboard_set_keymap(wlr_keyboard, keymap);
+  xkb_keymap_unref(keymap);
+  xkb_context_unref(context);
+
+  
+  wlr_keyboard_set_repeat_info(wlr_keyboard, 35, 200);
+  keyboard->key.notify = keyboardkey;
+  wl_signal_add(&wlr_keyboard->events.key, &keyboard->key);
+  keyboard->modifier.notify = keyboardmodifiers;
+  wl_signal_add(&wlr_keyboard->events.modifiers, &keyboard->modifier);
+  keyboard->destroy.notify = keyboardremove;
+  wl_signal_add(&device->events.destroy, &keyboard->destroy);
+
+  wl_list_insert(&keyboards, &keyboard->link);
+}
+
+void createpointer(struct wlr_input_device *device){
+  wlr_cursor_attach_input_device(cursor, device);
+}
+
+void createinput(struct wl_listener *listener, void *data){
+  struct wlr_input_device *device = data;
+  switch(device->type){
+    case WLR_INPUT_DEVICE_KEYBOARD:
+      createkeyboard(device);
+      break;
+    case WLR_INPUT_DEVICE_POINTER:
+      createpointer(device);
+      break;
+    default:
+      break;
+  }
+	uint32_t caps = WL_SEAT_CAPABILITY_POINTER;
+	if (!wl_list_empty(&keyboards)){
+		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	}
+	wlr_seat_set_capabilities(seat, caps);
+}
+
+void cursormove(){
+  if(gclient == NULL) return;
+  struct Client *client = gclient; 
+  wlr_scene_node_set_position(&client->scene_tree->node, cursor->x - grab_x, cursor->y - grab_y);
+}
+
+void cursorresize(){
+  // TODO : good resize
+  return;
+}
+
+void processcursormotion(uint32_t time){
+  if(cursor_mode == CursorMove){
+    cursormove();
+    return;
+  }
+  if(cursor_mode == CursorResize){
+    cursorresize();
+    return;
+  }
+  wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
+};
+
+void cursormotion(struct wl_listener *listener, void *data){
+  struct wlr_pointer_motion_event *event = data;
+  wlr_cursor_move(cursor, &event->pointer->base, event->delta_x, event->delta_y);
+  processcursormotion(event->time_msec);
+}
+
+void cursormotionabsolute(struct wl_listener *listener, void *data){
+  struct wlr_pointer_motion_absolute_event *event = data;
+  wlr_cursor_warp_absolute(cursor, &event->pointer->base, event->x, event->y);
+  processcursormotion(event->time_msec);
+}
+
+void cursoraxis(struct wl_listener *listener, void *data){
+  struct wlr_pointer_axis_event *event = data;
+  wlr_seat_pointer_notify_axis(seat, event->time_msec, event->orientation, event->delta, event->delta_discrete,
+                               event->source, event->relative_direction);
+}
+
+void cursorframe(struct wl_listener *listener, void *data){
+  wlr_seat_pointer_notify_frame(seat);
+}
+
+void cursorbutton(struct wl_listener *listener, void *data){
+  struct wlr_pointer_button_event *event = data;
+  wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
+
+  double sx, sy;
+  struct wlr_surface *surface = NULL;
+  struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
+  
+  switch(event->state){
+  case WL_POINTER_BUTTON_STATE_PRESSED:
+    /* TODO : expand this into a button.config like in dwl
+     * Plus remake this entire garbage
+    */
+    if(event->button == BTN_LEFT){
+      struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
+      struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
+      if(!scene_surface){
+        cursor_mode = CursorPassthrough;
+        gclient = NULL;
+        return;
+      }
+
+      surface = scene_surface->surface;
+      struct wlr_scene_tree *tree = node->parent;
+      while(tree != NULL && tree->node.data == NULL){
+        tree = tree->node.parent;
+      }
+
+      if(tree == NULL || tree->node.data == NULL){
+        cursor_mode = CursorPassthrough;
+        gclient = NULL;
+        return;
+      }
+      
+      struct LayerSurface *layer = tree->node.data;
+      if(layer->type == LayerShell){
+        wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
+        cursor_mode = CursorPassthrough;
+        gclient = NULL;
+        return;
+      }
+
+      struct Client *client = tree->node.data;
+      cursor_mode = CursorMove;
+      //setfocus(client);
+      gclient = client;
+      grab_x = cursor->x - client->scene_tree->node.x;
+      grab_y = cursor->y - client->scene_tree->node.y;
+      client->isfloating = true;
+    }
+    if(event->button == BTN_RIGHT){
+        // TOOD : special resizing in layout/normal when floating 
+        return;
+      }
+    return;
+  case WL_POINTER_BUTTON_STATE_RELEASED:
+    // BUG : monitors focus could be broken here
+    cursor_mode = CursorPassthrough;
+    gclient = NULL;
+    return;
+  }
+}
+
 void init(){
   wlr_log_init(WLR_DEBUG, NULL);  
   display = wl_display_create();
@@ -224,6 +592,7 @@ void init(){
     printf("couldnt create renderer\n");
     exit(1);
   }
+  scene = wlr_scene_create();
   wlr_renderer_init_wl_display(renderer, display);
 	if(wlr_renderer_get_texture_formats(renderer, WLR_BUFFER_CAP_DMABUF)){
 		wlr_drm_create(display, renderer);
@@ -244,7 +613,6 @@ void init(){
   wlr_subcompositor_create(display);
   wlr_data_device_manager_create(display);
 
-  scene = wlr_scene_create();
   output_layout = wlr_output_layout_create(display);
   xdg_output_manager = wlr_xdg_output_manager_v1_create(display, output_layout);
   //wl_signal_add(&xdg_output_mgr->events.apply, &output_manager_apply);
@@ -256,14 +624,14 @@ void init(){
 
 
   seat = wlr_seat_create(display, "seat0");
-  wl_signal_add(&seat->events.request_set_cursor, &request_set_cursor);
+  wl_signal_add(&seat->events.request_set_cursor, &request_cursor);
   wl_signal_add(&seat->events.request_set_selection, &request_set_selection);
-  //wl_signal_add(&seat->events.request_set_primary_selection, &request_set_primary_selection);
+  wl_signal_add(&seat->events.request_set_primary_selection, &request_set_primary_selection);
   //wl_signal_add(&seat->events.request_start_drag, &request_start_drag);
   //wl_signal_add(&seat->events.start_drag, &start_drag);
   
   xdg_shell = wlr_xdg_shell_create(display, 6);
-  wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
+  //wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
   //wl_signal_add(&xdg_shell->events.new_popup, &new_popup);
   wl_list_init(&clients);
 
@@ -279,10 +647,10 @@ void init(){
   wl_signal_add(&cursor->events.motion_absolute, &cursor_motion_absolute);
 
   decoration_manager = wlr_xdg_decoration_manager_v1_create(display);
-  wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
+  //wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
 
   layer_shell = wlr_layer_shell_v1_create(display, 3);
-  wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
+  //wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
   for(size_t i = 0; i < NUM_LAYERS; i++){
     layers[i] = wlr_scene_tree_create(&scene->tree);
   }

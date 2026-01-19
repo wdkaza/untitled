@@ -1,3 +1,6 @@
 #pragma once
 
-#define XWAYLAND true
+static const Key keys[] = {
+  // TODO
+  {}
+};

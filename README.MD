@@ -9,7 +9,7 @@ And well since its not even an alpha yet, wont write much here but my TODO list
 - [ ] fullscreen feature
 - [ ] amazing(hopefully) monitor layout support
 - [x] basic config in a .h file for now
-- [ ] layers support
+- [x] layers support
 - [ ] bars(waybar, etc) support
 - [ ] window layouts(master layout, etc)
 - [ ] xwayland support(highest priority)

@@ -268,6 +268,100 @@ struct Monitor *current_monitor;
 
 #include "config.h"
 
+void arrangelayers(struct Monitor *mon){
+  if(!mon) return;
+  return; // todo;
+}
+
+void commitlayersurfacenotify(struct wl_listener *listener, void *data){
+  struct LayerSurface *layer = wl_container_of(listener, layer, surface_commit);
+  struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
+  struct wlr_scene_tree *scene_layer = layers[layermap[layer_surface->current.layer]];
+  struct wlr_layer_surface_v1_state old_state;
+
+  if(layer->layer_surface->initial_commit){
+    old_state = layer->layer_surface->current;
+    layer->layer_surface->current = layer->layer_surface->pending;
+    arrangelayers(layer->mon);
+    layer->layer_surface->current = old_state;
+    return;
+  }
+
+  if(layer_surface->current.committed == 0 && layer->mapped == layer_surface->surface->mapped) return;
+
+  layer->mapped = layer_surface->surface->mapped;
+  wlr_scene_node_set_enabled(&layer->scene_tree->node, layer->mapped);
+  wlr_scene_node_set_enabled(&layer->popups->node, layer->mapped);
+	if(scene_layer != layer->scene_tree->node.parent){
+		wlr_scene_node_reparent(&layer->scene_tree->node, scene_layer);
+		wl_list_remove(&layer->link);
+		wl_list_insert(&layer->mon->layers[layer_surface->current.layer], &layer->link);
+		wlr_scene_node_reparent(&layer->popups->node, (layer_surface->current.layer
+				< ZWLR_LAYER_SHELL_V1_LAYER_TOP ? layers[LyrTop] : scene_layer));
+	}
+
+	arrangelayers(layer->mon);
+}
+
+void unmaplayersurfacenotify(struct wl_listener *listener, void *data){
+  struct LayerSurface *layer = wl_container_of(listener, layer, unmap);
+
+  layer->mapped = 0;
+  wlr_scene_node_set_enabled(&layer->scene_tree->node, 0);
+	if(layer->layer_surface->output && (layer->mon = layer->layer_surface->output->data))
+		arrangelayers(layer->mon);
+	if(layer->layer_surface->surface == seat->keyboard_state.focused_surface)
+    return;
+		//setfocus(focustop(current_monitor), 1);
+}
+
+void destroylayersurfacenotify(struct wl_listener *listener, void *data){
+  struct LayerSurface *layer = wl_container_of(listener, layer, destroy);
+  wl_list_remove(&layer->link);
+  wl_list_remove(&layer->destroy.link);
+  wl_list_remove(&layer->unmap.link);
+  wl_list_remove(&layer->surface_commit.link);
+  wlr_scene_node_destroy(&layer->scene_tree->node);
+  wlr_scene_node_destroy(&layer->popups->node);
+  free(layer);
+}
+
+void newlayersurface(struct wl_listener *listener, void *data){
+  struct wlr_layer_surface_v1 *layer_surface = data;
+  struct LayerSurface *layer;
+  struct wlr_surface *surface = layer_surface->surface;
+  struct wlr_scene_tree *scene_layer = layers[layermap[layer_surface->pending.layer]]; 
+
+  if(!layer_surface->output && 
+    !(layer_surface->output = current_monitor ? current_monitor->wlr_output : NULL)){
+    wlr_layer_surface_v1_destroy(layer_surface);
+    return;
+  }
+
+  layer = layer_surface->data = calloc(1, sizeof(*layer));
+  layer->type = LayerShell;
+
+  layer->surface_commit.notify = commitlayersurfacenotify;
+  wl_signal_add(&surface->events.commit, &layer->surface_commit);
+  layer->unmap.notify = unmaplayersurfacenotify;
+  wl_signal_add(&surface->events.unmap, &layer->unmap);
+  layer->destroy.notify = destroylayersurfacenotify;
+  wl_signal_add(&layer_surface->events.destroy, &layer->destroy);
+
+  layer->layer_surface = layer_surface;
+  layer->mon = layer_surface->output->data;
+  layer->scene_layer_surface = wlr_scene_layer_surface_v1_create(scene_layer, layer_surface);
+  layer->scene_tree = layer->scene_layer_surface->tree;
+  layer->popups = surface->data = wlr_scene_tree_create(layer_surface->current.layer
+			< ZWLR_LAYER_SHELL_V1_LAYER_TOP ? layers[LyrTop] : scene_layer);
+	layer->scene_tree->node.data = layer->popups->node.data = layer;
+
+  wlr_scene_node_set_enabled(&layer->scene_tree->node, false);
+  wl_list_insert(&layer->mon->layers[layer_surface->pending.layer], &layer->link);
+  wlr_surface_send_enter(surface, layer_surface->output);
+}
+
+
 void seatsetprimaryselection(struct wl_listener *listener, void *data){
   struct wlr_seat_request_set_primary_selection_event *event = data;
   wlr_seat_set_primary_selection(seat, event->source, event->serial);

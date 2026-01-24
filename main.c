@@ -1,3 +1,4 @@
+#include "wlr-layer-shell-unstable-v1-protocol.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -229,8 +230,7 @@ static struct wl_listener request_set_primary_selection = {.notify = seatsetprim
 static struct wl_listener request_cursor = {.notify = seatrequestcursor};
 static struct wl_listener new_decoration = {.notify = newdecoration};
 static struct wl_listener new_input = {.notify = createinput};
-//static struct wl_listener new_input = {.notify = createinput};
-//static struct wl_listener new_client = {.notify = newclient};
+static struct wl_listener new_client = {.notify = newclient};
 
 
 static struct wl_display *display;
@@ -268,9 +268,62 @@ struct Monitor *current_monitor;
 
 #include "config.h"
 
+void setfocus(struct Client *client){
+  if(client == NULL) return;
+  struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
+  struct wlr_surface *surface = client->surface.xdg->surface;
+  if(prev_surface == surface) return;
+  if(prev_surface){
+    struct wlr_xdg_toplevel *prev_toplevel = wlr_xdg_toplevel_try_from_wlr_surface(prev_surface);
+    if(prev_toplevel != NULL){
+      wlr_xdg_toplevel_set_activated(prev_toplevel, false);
+    }
+  }
+
+  struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
+  wlr_scene_node_raise_to_top(&client->scene_tree->node);
+  wl_list_remove(&client->link);
+  wl_list_insert(&clients, &client->link);
+  wlr_xdg_toplevel_set_activated(client->surface.xdg->toplevel, true);
+  if(keyboard != NULL){
+    wlr_seat_keyboard_notify_enter(seat, surface, keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
+  }  
+}
+
 void arrangelayers(struct Monitor *mon){
   if(!mon) return;
-  return; // todo;
+  for(int i = 0; i < 4; i++){
+    struct LayerSurface *layer;
+    wl_list_for_each(layer, &mon->layers[i], link){
+      struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
+      struct wlr_layer_surface_v1_state *state = &layer_surface->current;
+
+      struct wlr_box box = {.width = state->desired_width, .height = state->desired_height};
+      if(box.width == 0) box.width = mon->m.width;
+      if(box.height == 0) box.height = mon->m.height;
+
+      box.x = mon->m.x;
+      box.y = mon->m.y;
+
+      wlr_scene_node_set_position(&layer->scene_tree->node, box.x, box.y);
+      wlr_layer_surface_v1_configure(layer_surface, box.width, box.height);
+
+      if(state->exclusive_zone > 0){
+        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP)){
+          mon->m.y += state->exclusive_zone;
+        }
+        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM)){
+          mon->m.height -= state->exclusive_zone;
+        }
+        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT)){
+          mon->m.x += state->exclusive_zone;
+        }
+        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT)){
+          mon->m.width -= state->exclusive_zone;
+        }
+      }
+    }
+  }
 }
 
 void commitlayersurfacenotify(struct wl_listener *listener, void *data){
@@ -448,6 +501,10 @@ void createmon(struct wl_listener *listener, void *data){
 
   mon = calloc(1, sizeof(*mon));
   mon->wlr_output = wlr_output;
+  mon->m.x = 0; // TODO THIS IS VERY BAD
+  mon->m.y = 0; // TODO THIS IS VERY BAD
+  mon->m.width = mon->wlr_output->width; // TODO THIS IS VERY BAD
+  mon->m.height = mon->wlr_output->height; // TODO THIS IS VERY BAD
   wlr_output->data = mon;
   mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
   mon->frame.notify = rendermon; 
@@ -655,7 +712,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
 
       struct Client *client = tree->node.data;
       cursor_mode = CursorMove;
-      //setfocus(client);
+      setfocus(client);
       gclient = client;
       grab_x = cursor->x - client->scene_tree->node.x;
       grab_y = cursor->y - client->scene_tree->node.y;
@@ -672,6 +729,78 @@ void cursorbutton(struct wl_listener *listener, void *data){
     gclient = NULL;
     return;
   }
+}
+
+void mapnotify(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, map);
+  wl_list_insert(&clients, &client->link);
+}
+
+void unmapnotify(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, unmap);
+  wl_list_remove(&client->link);
+  if(!wl_list_empty(&clients)){
+    struct Client *next = wl_container_of(clients.next, next, link);
+    setfocus(next);
+  }
+  else{
+    wlr_seat_keyboard_clear_focus(seat);
+  }
+}
+
+void commitnotify(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, commit);
+  if(client->surface.xdg->initial_commit){
+    wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, 0, 0);
+  }
+}
+
+void destroynotify(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, destroy);
+  wl_list_remove(&client->map.link);
+  wl_list_remove(&client->unmap.link);
+  wl_list_remove(&client->commit.link);
+  wl_list_remove(&client->destroy.link);
+  wl_list_remove(&client->maximize.link);
+  wl_list_remove(&client->fullscreen.link);
+  free(client);
+}
+
+void fullscreennotify(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, fullscreen);
+  if(client->surface.xdg->initialized){
+ 		wlr_xdg_surface_schedule_configure(client->surface.xdg);
+  }
+}
+void maximizenotify(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, maximize);
+  if(client->surface.xdg->initialized){
+ 		wlr_xdg_surface_schedule_configure(client->surface.xdg);
+  }
+}
+
+void newclient(struct wl_listener *listener, void *data){
+  struct wlr_xdg_toplevel *toplevel = data;
+  struct Client *client = calloc(1, sizeof(*client));
+  client->scene_tree = wlr_scene_xdg_surface_create(&scene->tree, toplevel->base);
+  client->scene_tree->node.data = client;
+  client->surface.xdg = toplevel->base;
+  //client->desktop_index = current_desktop;
+  client->decoration = NULL;
+  toplevel->base->data = client->scene_tree;
+
+  client->map.notify = mapnotify;
+  wl_signal_add(&toplevel->base->surface->events.map, &client->map);
+  client->unmap.notify = unmapnotify;
+  wl_signal_add(&toplevel->base->surface->events.unmap, &client->unmap);
+  client->commit.notify = commitnotify;
+  wl_signal_add(&toplevel->base->surface->events.commit, &client->commit);
+  client->destroy.notify = destroynotify;
+  wl_signal_add(&toplevel->events.destroy, &client->destroy);
+  client->fullscreen.notify = fullscreennotify;
+  wl_signal_add(&toplevel->events.request_fullscreen, &client->fullscreen);
+  client->maximize.notify = maximizenotify;
+  wl_signal_add(&toplevel->events.request_maximize, &client->maximize);
 }
 
 void init(){
@@ -725,7 +854,7 @@ void init(){
   //wl_signal_add(&seat->events.start_drag, &start_drag);
   
   xdg_shell = wlr_xdg_shell_create(display, 6);
-  //wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
+  wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
   //wl_signal_add(&xdg_shell->events.new_popup, &new_popup);
   wl_list_init(&clients);
 

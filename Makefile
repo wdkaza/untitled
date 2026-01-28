@@ -4,7 +4,7 @@ PKGS = wlroots-0.20 wayland-server xkbcommon xwayland
 # TODO : remake makefile myself, this was done by chatgpt bcs i couldnt compile for some reason, maybe switch to meson
 CFLAGS_PKG_CONFIG = $(shell $(PKG_CONFIG) --cflags $(PKGS))
 CFLAGS_PKG_CONFIG += -I/usr/src/debug/wlroots-asan-git/build/protocol
-LIBS = $(shell $(PKG_CONFIG) --libs $(PKGS))
+LIBS = $(shell $(PKG_CONFIG) --libs $(PKGS) xcb-icccm)
 
 ASAN ?= 1
 

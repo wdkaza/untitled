@@ -121,6 +121,7 @@ struct Client{
 
   int isfloating;  
   int isfullscreen;
+  int isurgent;
 
   struct wlr_xdg_toplevel_decoration_v1 *decoration;
   struct wl_listener decoration_set_mode;
@@ -132,6 +133,14 @@ struct Client{
   struct wl_listener unmap;
   struct wl_listener commit;
   struct wl_listener destroy;
+
+#ifdef XWAYLAND
+	struct wl_listener activate;
+	struct wl_listener associate;
+	struct wl_listener dissociate;
+	struct wl_listener configure;
+	struct wl_listener set_hints;
+#endif
 };
 /* struct Popup{}; */
 
@@ -196,6 +205,11 @@ static void seatsetprimaryselection(struct wl_listener *listener, void *data);
 static void createkeyboard(struct wlr_input_device *device);
 static void createpointer(struct wlr_input_device *device);
 static void processcursormotion(uint32_t time);
+static void newlayersurface(struct wl_listener *listener, void *data);
+static void arrangelayers(struct Monitor *mon);
+static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
+static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
+static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfocus(struct Client *client);
 static void cursormove();
 static void cursorresize();
@@ -207,19 +221,20 @@ static void destroylisteners();
 
 // most of xwayland come will come from straight from dwl
 
-//static void activatex11(struct wl_listener *listener, void *data);
-//static void associatex11(struct wl_listener *listener, void *data);
-//static void configurex11(struct wl_listener *listener, void *data);
-//static void createnotifyx11(struct wl_listener *listener, void *data);
-//static void dissociatex11(struct wl_listener *listener, void *data);
-//static void sethints(struct wl_listener *listener, void *data);
-//static void xwaylandready(struct wl_listener *listener, void *data);
-//static struct wl_listener new_xwayland_surface = {.notify = createnotifyx11};
-//static struct wl_listener xwayland_ready = {.notify = xwaylandready};
+static void activatex11(struct wl_listener *listener, void *data);
+static void associatex11(struct wl_listener *listener, void *data);
+static void configurex11(struct wl_listener *listener, void *data);
+static void newclientx11(struct wl_listener *listener, void *data);
+static void dissociatex11(struct wl_listener *listener, void *data);
+static void sethints(struct wl_listener *listener, void *data);
+static void xwaylandready(struct wl_listener *listener, void *data);
+static struct wl_listener new_xwayland_surface = {.notify = newclientx11};
+static struct wl_listener xwayland_ready = {.notify = xwaylandready};
 static struct wlr_xwayland *xwayland;
 #endif
 
 static struct wl_listener new_output = {.notify = createmon};
+static struct wl_listener new_layer_surface = {.notify = newlayersurface};
 static struct wl_listener cursor_motion = {.notify = cursormotion};
 static struct wl_listener cursor_motion_absolute = {.notify = cursormotionabsolute};
 static struct wl_listener cursor_axis = {.notify = cursoraxis};
@@ -514,11 +529,9 @@ void createmon(struct wl_listener *listener, void *data){
   mon->destroy.notify = destroymon;
   wl_signal_add(&wlr_output->events.destroy, &mon->destroy);
 
-  /*
   for(size_t i = 0; i < 4; i++){
     wl_list_init(&mon->layers[i]);
   }
-  */
 
   wl_list_insert(&mons, &mon->link); 
 
@@ -781,13 +794,10 @@ void maximizenotify(struct wl_listener *listener, void *data){
 
 void newclient(struct wl_listener *listener, void *data){
   struct wlr_xdg_toplevel *toplevel = data;
-  struct Client *client = calloc(1, sizeof(*client));
-  client->scene_tree = wlr_scene_xdg_surface_create(&scene->tree, toplevel->base);
-  client->scene_tree->node.data = client;
+  struct Client *client;
+
+  client = toplevel->base->data = calloc(1, sizeof(*client));
   client->surface.xdg = toplevel->base;
-  //client->desktop_index = current_desktop;
-  client->decoration = NULL;
-  toplevel->base->data = client->scene_tree;
 
   client->map.notify = mapnotify;
   wl_signal_add(&toplevel->base->surface->events.map, &client->map);
@@ -801,6 +811,97 @@ void newclient(struct wl_listener *listener, void *data){
   wl_signal_add(&toplevel->events.request_fullscreen, &client->fullscreen);
   client->maximize.notify = maximizenotify;
   wl_signal_add(&toplevel->events.request_maximize, &client->maximize);
+}
+
+void associatex11(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, associate);
+
+  client->map.notify = mapnotify;
+  wl_signal_add(&client->surface.xwayland->surface->events.map, &client->map);
+  client->unmap.notify = unmapnotify;
+  wl_signal_add(&client->surface.xwayland->surface->events.unmap, &client->unmap);
+}
+
+void dissociatex11(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, dissociate);
+  wl_list_remove(&client->map.link);
+  wl_list_remove(&client->unmap.link);
+}
+
+void configurex11(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, configure);
+  struct wlr_xwayland_surface_configure_event *event = data;
+
+  wlr_xwayland_surface_configure(client->surface.xwayland, 
+                                 event->x,
+                                 event->y,
+                                 event->width,
+                                 event->height);
+
+  if(client->scene_tree){
+    wlr_scene_node_set_position(&client->scene_tree->node, event->x, event->y);
+  }
+}
+
+void activatex11(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, activate);
+  if(client->surface.xwayland->override_redirect){
+    wlr_xwayland_surface_activate(client->surface.xwayland, 1);
+  }
+}
+
+void sethintsx11(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, set_hints);
+  struct wlr_surface *surface = client->surface.xwayland->surface;
+
+  if(!client->surface.xwayland->hints){
+    return;
+  }
+
+  client->isurgent = xcb_icccm_wm_hints_get_urgency(client->surface.xwayland->hints);
+  // TODO this function is mostly unfunctional right now
+  // used for setting urgency to x11 client
+}
+
+void newclientx11(struct wl_listener *listener, void *data){
+  struct wlr_xwayland_surface *xsurface = data;
+  struct Client *client;
+  
+  client = xsurface->data = calloc(1, sizeof(*client));
+  client->surface.xwayland = xsurface;
+  client->type = X11;
+
+  client->associate.notify = associatex11;
+  wl_signal_add(&xsurface->events.associate, &client->associate);
+  client->dissociate.notify = dissociatex11;
+  wl_signal_add(&xsurface->events.dissociate, &client->dissociate);
+  client->activate.notify = activatex11;
+  wl_signal_add(&xsurface->events.request_activate, &client->activate);
+  client->configure.notify = configurex11;
+  wl_signal_add(&xsurface->events.request_configure, &client->configure);
+  client->set_hints.notify = sethintsx11;
+  wl_signal_add(&xsurface->events.set_hints, &client->set_hints);
+  client->destroy.notify = destroynotify;
+  wl_signal_add(&xsurface->events.destroy, &client->destroy);
+  client->fullscreen.notify = fullscreennotify;
+  wl_signal_add(&xsurface->events.request_fullscreen, &client->fullscreen);
+  client->maximize.notify = maximizenotify;
+  wl_signal_add(&xsurface->events.request_maximize, &client->maximize);
+}
+
+void xwaylandready(struct wl_listener *listener, void *data){
+  struct wlr_xcursor *xcursor;
+  wlr_xwayland_set_seat(xwayland, seat);
+
+  if((xcursor = wlr_xcursor_manager_get_xcursor(cursor_manager, "default", 1))){
+    wlr_xwayland_set_cursor(xwayland,
+                            xcursor->images[0]->buffer,
+                            xcursor->images[0]->width * 4,
+                            xcursor->images[0]->width,
+                            xcursor->images[0]->height,
+                            xcursor->images[0]->hotspot_x,
+                            xcursor->images[0]->hotspot_y);
+  }
 }
 
 void init(){
@@ -870,10 +971,10 @@ void init(){
   wl_signal_add(&cursor->events.motion_absolute, &cursor_motion_absolute);
 
   decoration_manager = wlr_xdg_decoration_manager_v1_create(display);
-  //wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
+  wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
 
   layer_shell = wlr_layer_shell_v1_create(display, 3);
-  //wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
+  wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
   for(size_t i = 0; i < NUM_LAYERS; i++){
     layers[i] = wlr_scene_tree_create(&scene->tree);
   }
@@ -885,8 +986,8 @@ void init(){
   unsetenv("DISPLAY");
 #ifdef XWAYLAND
   if((xwayland = wlr_xwayland_create(display, compositor, 1))){
-		//wl_signal_add(&xwayland->events.ready, &xwayland_ready);
-		//wl_signal_add(&xwayland->events.new_surface, &new_xwayland_surface);
+		wl_signal_add(&xwayland->events.ready, &xwayland_ready);
+		wl_signal_add(&xwayland->events.new_surface, &new_xwayland_surface);
 
 		setenv("DISPLAY", xwayland->display_name, 1);
   }

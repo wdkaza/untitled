@@ -109,7 +109,8 @@ struct Client{
   struct wl_list link;
   struct Monitor *mon;
 
-  struct wlr_scene_tree *scene_tree;
+  struct wlr_scene_tree *scene_tree; //position/container
+  struct wlr_scene_tree *scene_surface; // client pixels
   //struct wlr_scene_rect *border[4];
   //uint32_t bw;
 
@@ -211,6 +212,7 @@ static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfocus(struct Client *client);
+static void spawn(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -282,6 +284,15 @@ static uint32_t current_desktop;
 struct Monitor *current_monitor;
 
 #include "config.h"
+
+void spawn(const Arg *arg){
+  if(fork() == 0){
+    setsid();
+    execvp(((char *const *)arg->v)[0], (char *const *)arg->v);
+    perror("execvp");
+    exit(1);
+  }
+}
 
 void setfocus(struct Client *client){
   if(client == NULL) return;
@@ -464,8 +475,7 @@ void decoration_destroy(struct wl_listener *listener, void *data){
 void newdecoration(struct wl_listener *listener, void *data){
   struct wlr_xdg_toplevel_decoration_v1 *decoration = data; 
   struct wlr_xdg_toplevel *toplevel = decoration->toplevel;
-  struct wlr_scene_tree *scene_tree = toplevel->base->data;
-  struct Client *client = scene_tree->node.data;
+  struct Client *client = toplevel->base->data;
 
   client->decoration = decoration;
   client->decoration_set_mode.notify = decoration_set_mode;
@@ -516,10 +526,18 @@ void createmon(struct wl_listener *listener, void *data){
 
   mon = calloc(1, sizeof(*mon));
   mon->wlr_output = wlr_output;
+  struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+  if(mode){
+    mon->m.width = mode->width;
+    mon->m.height = mode->height;
+  }
+  else{
+    mon->m.width = wlr_output->width;
+    mon->m.height = wlr_output->height;
+  }
+  mon->w = mon->m;
   mon->m.x = 0; // TODO THIS IS VERY BAD
   mon->m.y = 0; // TODO THIS IS VERY BAD
-  mon->m.width = mon->wlr_output->width; // TODO THIS IS VERY BAD
-  mon->m.height = mon->wlr_output->height; // TODO THIS IS VERY BAD
   wlr_output->data = mon;
   mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
   mon->frame.notify = rendermon; 
@@ -688,7 +706,10 @@ void cursorbutton(struct wl_listener *listener, void *data){
   double sx, sy;
   struct wlr_surface *surface = NULL;
   struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
-  
+  if(!node || node->type != WLR_SCENE_NODE_BUFFER){
+    return; 
+  }
+
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:
     /* TODO : expand this into a button.config like in dwl
@@ -745,7 +766,18 @@ void cursorbutton(struct wl_listener *listener, void *data){
 }
 
 void mapnotify(struct wl_listener *listener, void *data){
+  struct wlr_xdg_toplevel *toplevel = data;
   struct Client *client = wl_container_of(listener, client, map);
+
+  if(!client->mon && current_monitor){
+    client->mon = current_monitor;
+  }
+
+  client->scene_tree = wlr_scene_tree_create(layers[LyrTile]);
+  client->scene_surface = client->type == XDGShell ? 
+    wlr_scene_xdg_surface_create(client->scene_tree, client->surface.xdg)
+    : wlr_scene_subsurface_tree_create(client->scene_tree, client->surface.xwayland->surface);
+  client->scene_tree->node.data = client->scene_surface->node.data = client;
   wl_list_insert(&clients, &client->link);
 }
 
@@ -798,6 +830,8 @@ void newclient(struct wl_listener *listener, void *data){
 
   client = toplevel->base->data = calloc(1, sizeof(*client));
   client->surface.xdg = toplevel->base;
+  client->type = XDGShell;
+  client->mon = current_monitor;
 
   client->map.notify = mapnotify;
   wl_signal_add(&toplevel->base->surface->events.map, &client->map);
@@ -869,6 +903,7 @@ void newclientx11(struct wl_listener *listener, void *data){
   
   client = xsurface->data = calloc(1, sizeof(*client));
   client->surface.xwayland = xsurface;
+  client->mon = current_monitor;
   client->type = X11;
 
   client->associate.notify = associatex11;
@@ -1007,7 +1042,7 @@ void run(){
     fprintf(stderr, "failed to start the backend\n");
     exit(1);
   }
-	wlr_cursor_set_xcursor(cursor, cursor_manager, "default\n");
+	wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
   wl_display_run(display);
 }
 

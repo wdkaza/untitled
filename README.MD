@@ -1,4 +1,4 @@
-# untitled (pre-aplha 0.0.3)
+# untitled (pre-aplha 0.0.4)
 A minimal wayland window manager inspired by dwl  
 Why "untitled"? The state of it is so early im still not sure of what to call it  
 And well since its not even an alpha yet, wont write much here but my TODO list  
@@ -6,7 +6,7 @@ And well since its not even an alpha yet, wont write much here but my TODO list
 # TODO
 - [x] basic window managment
 - [ ] moving/resizing windows
-- [ ] fullscreen feature
+- [ ] fullscreen feature and more
 - [ ] amazing(hopefully) monitor layout support
 - [x] basic config in a .h file for now
 - [x] layers support

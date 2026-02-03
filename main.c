@@ -213,6 +213,7 @@ static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
+static void cyclefocus(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -285,6 +286,12 @@ struct Monitor *current_monitor;
 
 #include "config.h"
 
+void cyclefocus(const Arg *arg){
+  if(wl_list_length(&clients) < 2) return;
+  struct Client *next_client = wl_container_of(clients.prev, next_client, link);
+  setfocus(next_client);
+}
+
 void spawn(const Arg *arg){
   if(fork() == 0){
     setsid();
@@ -299,18 +306,25 @@ void setfocus(struct Client *client){
   struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
   struct wlr_surface *surface = client->surface.xdg->surface;
   if(prev_surface == surface) return;
+  /*
   if(prev_surface){
     struct wlr_xdg_toplevel *prev_toplevel = wlr_xdg_toplevel_try_from_wlr_surface(prev_surface);
     if(prev_toplevel != NULL){
       wlr_xdg_toplevel_set_activated(prev_toplevel, false);
     }
   }
-
-  struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
+  */
   wlr_scene_node_raise_to_top(&client->scene_tree->node);
   wl_list_remove(&client->link);
   wl_list_insert(&clients, &client->link);
-  wlr_xdg_toplevel_set_activated(client->surface.xdg->toplevel, true);
+  if(client->type == X11){
+    wlr_xwayland_surface_activate(client->surface.xwayland, 1); 
+  }
+  else{
+    wlr_xdg_toplevel_set_activated(client->surface.xdg->toplevel, 1);
+  }
+
+  struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
   if(keyboard != NULL){
     wlr_seat_keyboard_notify_enter(seat, surface, keyboard->keycodes, keyboard->num_keycodes, &keyboard->modifiers);
   }  
@@ -675,6 +689,18 @@ void processcursormotion(uint32_t time){
     return;
   }
   wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
+
+  double sx, sy;
+  struct wlr_surface *surface = NULL;
+  struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
+  struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
+  struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
+
+  if(!scene_surface) return;
+  surface = scene_surface->surface;
+
+  wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
+  wlr_seat_pointer_notify_motion(seat, time, sx, sy);
 };
 
 void cursormotion(struct wl_listener *listener, void *data){
@@ -743,6 +769,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
         gclient = NULL;
         return;
       }
+
 
       struct Client *client = tree->node.data;
       cursor_mode = CursorMove;
@@ -1038,6 +1065,7 @@ void run(){
     fprintf(stderr, "failed to init a socket\n");
     exit(1);
   }
+  setenv("WAYLAND_DISPLAY", socket, true);
   if(!wlr_backend_start(backend)){
     fprintf(stderr, "failed to start the backend\n");
     exit(1);

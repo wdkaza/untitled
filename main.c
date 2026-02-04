@@ -250,7 +250,6 @@ static struct wl_listener new_decoration = {.notify = newdecoration};
 static struct wl_listener new_input = {.notify = createinput};
 static struct wl_listener new_client = {.notify = newclient};
 
-
 static struct wl_display *display;
 static struct wlr_backend *backend;
 static struct wlr_renderer *renderer;
@@ -259,7 +258,9 @@ static struct wlr_compositor *compositor;
 static struct wlr_scene *scene;
 static struct wlr_output_layout *output_layout;
 static struct wlr_xdg_output_manager_v1 *xdg_output_manager;
-//struct wlr_xdg_activation_v1 *activation;
+static struct wlr_viewporter *viewporter;
+static struct wlr_fractional_scale_manager_v1 *fractional_scale;
+static struct wlr_xdg_activation_v1 *activation;
 
 static struct wlr_cursor *cursor;
 static uint32_t cursor_mode;
@@ -304,7 +305,13 @@ void spawn(const Arg *arg){
 void setfocus(struct Client *client){
   if(client == NULL) return;
   struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
-  struct wlr_surface *surface = client->surface.xdg->surface;
+  struct wlr_surface *surface = NULL;
+  if(client->type == X11){
+    surface = client->surface.xwayland->surface;
+  }
+  else{
+    surface = client->surface.xdg->surface;
+  }
   if(prev_surface == surface) return;
   /*
   if(prev_surface){
@@ -314,6 +321,7 @@ void setfocus(struct Client *client){
     }
   }
   */
+   // TODO : well alot, this function needs a rewrite later
   wlr_scene_node_raise_to_top(&client->scene_tree->node);
   wl_list_remove(&client->link);
   wl_list_insert(&clients, &client->link);
@@ -693,14 +701,22 @@ void processcursormotion(uint32_t time){
   double sx, sy;
   struct wlr_surface *surface = NULL;
   struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
+  if(!node || node->type != WLR_SCENE_NODE_BUFFER){
+    return; 
+  } 
   struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
   struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
 
-  if(!scene_surface) return;
-  surface = scene_surface->surface;
+  if(scene_surface){
+    surface = scene_surface->surface;
 
-  wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
-  wlr_seat_pointer_notify_motion(seat, time, sx, sy);
+
+    wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
+    wlr_seat_pointer_notify_motion(seat, time, sx, sy);
+  }
+  else{
+    wlr_seat_pointer_clear_focus(seat);
+  }
 };
 
 void cursormotion(struct wl_listener *listener, void *data){
@@ -761,7 +777,8 @@ void cursorbutton(struct wl_listener *listener, void *data){
         gclient = NULL;
         return;
       }
-      
+     
+      /*
       struct LayerSurface *layer = tree->node.data;
       if(layer->type == LayerShell){
         wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
@@ -769,6 +786,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
         gclient = NULL;
         return;
       }
+      */
 
 
       struct Client *client = tree->node.data;
@@ -829,10 +847,29 @@ void commitnotify(struct wl_listener *listener, void *data){
 
 void destroynotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, destroy);
+  if(seat->keyboard_state.focused_surface == client->surface.xdg->surface){
+    wlr_seat_keyboard_clear_focus(seat);
+  }
   wl_list_remove(&client->map.link);
   wl_list_remove(&client->unmap.link);
   wl_list_remove(&client->commit.link);
   wl_list_remove(&client->destroy.link);
+  wl_list_remove(&client->maximize.link);
+  wl_list_remove(&client->fullscreen.link);
+  free(client);
+}
+
+void destroynotifyx11(struct wl_listener *listener, void *data){
+  struct Client *client = wl_container_of(listener, client, destroy);
+  if(seat->keyboard_state.focused_surface == client->surface.xwayland->surface){
+    wlr_seat_keyboard_clear_focus(seat);
+  }
+  wl_list_remove(&client->activate.link);
+  wl_list_remove(&client->associate.link);
+  wl_list_remove(&client->dissociate.link);
+  wl_list_remove(&client->destroy.link);
+  wl_list_remove(&client->configure.link);
+  wl_list_remove(&client->set_hints.link);
   wl_list_remove(&client->maximize.link);
   wl_list_remove(&client->fullscreen.link);
   free(client);
@@ -932,6 +969,9 @@ void newclientx11(struct wl_listener *listener, void *data){
   client->surface.xwayland = xsurface;
   client->mon = current_monitor;
   client->type = X11;
+  if(xsurface->override_redirect){
+    client->isfloating = 1;
+  }
 
   client->associate.notify = associatex11;
   wl_signal_add(&xsurface->events.associate, &client->associate);
@@ -943,7 +983,7 @@ void newclientx11(struct wl_listener *listener, void *data){
   wl_signal_add(&xsurface->events.request_configure, &client->configure);
   client->set_hints.notify = sethintsx11;
   wl_signal_add(&xsurface->events.set_hints, &client->set_hints);
-  client->destroy.notify = destroynotify;
+  client->destroy.notify = destroynotifyx11;
   wl_signal_add(&xsurface->events.destroy, &client->destroy);
   client->fullscreen.notify = fullscreennotify;
   wl_signal_add(&xsurface->events.request_fullscreen, &client->fullscreen);
@@ -1001,6 +1041,10 @@ void init(){
 
   output_layout = wlr_output_layout_create(display);
   xdg_output_manager = wlr_xdg_output_manager_v1_create(display, output_layout);
+  viewporter = wlr_viewporter_create(display);
+	fractional_scale = wlr_fractional_scale_manager_v1_create(display, 1);
+  //activation = wlr_xdg_activation_v1_create(display);
+
   //wl_signal_add(&xdg_output_mgr->events.apply, &output_manager_apply);
 	//wl_signal_add(&xdg_output_mgr->events.test, &output_manager_test);
 

@@ -1,7 +1,7 @@
-# untitled (pre-aplha 0.0.5)
+# untitled (pre-aplha 0.0.6)
 A minimal wayland window manager inspired by dwl  
 Why "untitled"? The state of it is so early im still not sure of what to call it  
-And well since its not even an alpha yet, wont write much here but my TODO list  
+And well since its not even an alpha yet, wont write much here, but my TODO list  
 
 # TODO
 - [x] basic window managment
@@ -12,7 +12,7 @@ And well since its not even an alpha yet, wont write much here but my TODO list
 - [x] layers support
 - [ ] bars(waybar, etc) support
 - [ ] window layouts(master layout, etc)
-- [x] xwayland support(highest priority)
+- [x] xwayland support(highest priority(DONE!!))
 - [ ] making it stable and usable, trying to daily drive
 
 these are the goals for it making this window manager to an alpha stage, after doing all that  

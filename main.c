@@ -213,6 +213,7 @@ static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
+static void killclient(const Arg *arg);
 static void cyclefocus(const Arg *arg);
 static void cursormove();
 static void cursorresize();
@@ -284,6 +285,7 @@ static struct wl_list keyboards;
 
 static uint32_t current_desktop;
 struct Monitor *current_monitor;
+static struct Client *focused_client;
 
 #include "config.h"
 
@@ -302,8 +304,20 @@ void spawn(const Arg *arg){
   }
 }
 
+void killclient(const Arg *arg){
+  if(focused_client == NULL) return;
+  if(wl_list_empty(&clients)) return;
+  if(focused_client->type == X11){
+    wlr_xwayland_surface_close(focused_client->surface.xwayland);
+  }
+  else{
+    wlr_xdg_toplevel_send_close(focused_client->surface.xdg->toplevel);
+  }
+}
+
 void setfocus(struct Client *client){
   if(client == NULL) return;
+  focused_client = client;
   struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
   struct wlr_surface *surface = NULL;
   if(client->type == X11){
@@ -896,6 +910,7 @@ void newclient(struct wl_listener *listener, void *data){
   client->surface.xdg = toplevel->base;
   client->type = XDGShell;
   client->mon = current_monitor;
+  focused_client = client; // TODO : temp fix, maybe move somewhere else, same with x11
 
   client->map.notify = mapnotify;
   wl_signal_add(&toplevel->base->surface->events.map, &client->map);
@@ -969,6 +984,7 @@ void newclientx11(struct wl_listener *listener, void *data){
   client->surface.xwayland = xsurface;
   client->mon = current_monitor;
   client->type = X11;
+  focused_client = client; // TODO : temp fix
   if(xsurface->override_redirect){
     client->isfloating = 1;
   }

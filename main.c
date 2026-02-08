@@ -76,6 +76,7 @@
 #define CLEANMASK(mask)         (mask & ~WLR_MODIFIER_CAPS)
 #define END(A)                  ((A) + LENGTH(A))
 #define LENGTH(X)               (sizeof X / sizeof X[0])
+#define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = calloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
 enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize};
 enum { XDGShell, LayerShell, X11 };
@@ -120,6 +121,7 @@ struct Client{
   } surface;
 
 
+  uint32_t desktop_index;
   int isfloating;  
   int isfullscreen;
   int isurgent;
@@ -157,6 +159,13 @@ typedef struct{
 	void (*func)(const Arg *);
 	const Arg arg;
 }Key;
+
+typedef struct {
+	uint32_t mod;
+	uint32_t button;
+	void (*func)(const Arg *);
+	const Arg arg;
+} Button;
 
 
 struct Keyboard{
@@ -207,6 +216,9 @@ static void createkeyboard(struct wlr_input_device *device);
 static void createpointer(struct wlr_input_device *device);
 static void processcursormotion(uint32_t time);
 static void newlayersurface(struct wl_listener *listener, void *data);
+static void startdrag(struct wl_listener *listener, void *data);
+static void requeststartdrag(struct wl_listener *listener, void *data);
+static void destroydragicon(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
@@ -215,6 +227,7 @@ static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
 static void killclient(const Arg *arg);
 static void cyclefocus(const Arg *arg);
+static void changedesktop(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -250,6 +263,8 @@ static struct wl_listener request_cursor = {.notify = seatrequestcursor};
 static struct wl_listener new_decoration = {.notify = newdecoration};
 static struct wl_listener new_input = {.notify = createinput};
 static struct wl_listener new_client = {.notify = newclient};
+static struct wl_listener start_drag = {.notify = startdrag};
+static struct wl_listener request_start_drag = {.notify = requeststartdrag};
 
 static struct wl_display *display;
 static struct wlr_backend *backend;
@@ -266,6 +281,7 @@ static struct wlr_xdg_activation_v1 *activation;
 static struct wlr_cursor *cursor;
 static uint32_t cursor_mode;
 static struct wlr_xcursor_manager *cursor_manager;
+static struct wlr_scene_tree *drag_icon;
 
 static struct wlr_seat *seat;
 
@@ -293,6 +309,20 @@ void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
   struct Client *next_client = wl_container_of(clients.prev, next_client, link);
   setfocus(next_client);
+}
+
+void changedesktop(const Arg *arg){
+  current_desktop = arg->i;
+  struct Client *client;
+  wl_list_for_each(client, &clients, link){
+    if(client->desktop_index == current_desktop && client->surface.xdg->surface->mapped){ // sedcond statement might be USELESS!!!!!
+      wlr_scene_node_set_enabled(&client->scene_tree->node, true);
+    }
+    else{
+      wlr_scene_node_set_enabled(&client->scene_tree->node, false);
+    }
+  }
+  //arrange();
 }
 
 void spawn(const Arg *arg){
@@ -702,6 +732,7 @@ void cursorresize(){
 }
 
 void processcursormotion(uint32_t time){
+	wlr_scene_node_set_position(&drag_icon->node, (int)round(cursor->x), (int)round(cursor->y)); // TODO : may be broken
   if(cursor_mode == CursorMove){
     cursormove();
     return;
@@ -926,6 +957,29 @@ void newclient(struct wl_listener *listener, void *data){
   wl_signal_add(&toplevel->events.request_maximize, &client->maximize);
 }
 
+void destroydragicon(struct wl_listener *listener, void *data){
+  wl_list_remove(&listener->link);
+	free(listener);
+}
+
+void requeststartdrag(struct wl_listener *listener, void *data){
+  struct wlr_seat_request_start_drag_event *event = data;
+  if(wlr_seat_validate_pointer_grab_serial(seat, event->origin, event->serial)){
+    wlr_seat_start_pointer_drag(seat, event->drag, event->serial);
+  }
+  else{
+    wlr_data_source_destroy(event->drag->source);
+  }
+}
+
+void startdrag(struct wl_listener *listener, void *data){
+  struct wlr_drag *drag = data;
+  if(!drag->icon) return;
+
+	drag->icon->data = &wlr_scene_drag_icon_create(drag_icon, drag->icon)->node;
+	LISTEN_STATIC(&drag->icon->events.destroy, destroydragicon);
+}
+
 void associatex11(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, associate);
 
@@ -1073,8 +1127,8 @@ void init(){
   wl_signal_add(&seat->events.request_set_cursor, &request_cursor);
   wl_signal_add(&seat->events.request_set_selection, &request_set_selection);
   wl_signal_add(&seat->events.request_set_primary_selection, &request_set_primary_selection);
-  //wl_signal_add(&seat->events.request_start_drag, &request_start_drag);
-  //wl_signal_add(&seat->events.start_drag, &start_drag);
+  wl_signal_add(&seat->events.request_start_drag, &request_start_drag);
+  wl_signal_add(&seat->events.start_drag, &start_drag);
   
   xdg_shell = wlr_xdg_shell_create(display, 6);
   wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
@@ -1100,6 +1154,9 @@ void init(){
   for(size_t i = 0; i < NUM_LAYERS; i++){
     layers[i] = wlr_scene_tree_create(&scene->tree);
   }
+	drag_icon = wlr_scene_tree_create(&scene->tree);
+	wlr_scene_node_place_below(&drag_icon->node, &layers[LyrBlock]->node);
+
 
   wl_list_init(&mons);
   wl_signal_add(&backend->events.new_output, &new_output);

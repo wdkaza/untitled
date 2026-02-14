@@ -4,6 +4,10 @@
 
 static const char *terminal[] = { "kitty", NULL };
 
+//static const float fullscreen_bg[] =; 
+static const float focused_border_color[] = {1.0f, 0.0f, 0.0f, 1.0f};
+static const float unfocused_border_color[] = {0.0f, 1.0f, 0.0f, 1.0f};
+
 static const Key keys[] = {
   {MODKEY,                    XKB_KEY_n,           spawn,            {.v = terminal} },
   {MODKEY,                    XKB_KEY_w,           cyclefocus,       {}},

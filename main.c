@@ -112,8 +112,8 @@ struct Client{
 
   struct wlr_scene_tree *scene_tree; //position/container
   struct wlr_scene_tree *scene_surface; // client pixels
-  //struct wlr_scene_rect *border[4];
-  //uint32_t bw;
+  struct wlr_scene_rect *border[4];
+  uint32_t bw;
 
   union{
     struct wlr_xdg_surface *xdg;
@@ -121,6 +121,7 @@ struct Client{
   } surface;
 
 
+  //int isfocused;
   uint32_t desktop_index;
   int isfloating;  
   int isfullscreen;
@@ -325,13 +326,15 @@ void changedesktop(const Arg *arg){
   //arrange();
 }
 
-void spawn(const Arg *arg){
-  if(fork() == 0){
-    setsid();
-    execvp(((char *const *)arg->v)[0], (char *const *)arg->v);
-    perror("execvp");
+void
+spawn(const Arg *arg)
+{
+	if (fork() == 0) {
+		dup2(STDERR_FILENO, STDOUT_FILENO);
+		setsid();
+		execvp(((char **)arg->v)[0], (char **)arg->v);
     exit(1);
-  }
+	}
 }
 
 void killclient(const Arg *arg){
@@ -382,8 +385,31 @@ void setfocus(struct Client *client){
   }  
 }
 
+static void updateborders(struct Client *client, int width, int height){
+  //t
+  wlr_scene_rect_set_size(client->border[0], width, client->bw);
+  wlr_scene_node_set_position(&client->border[0]->node, 0, 0);
+  //l
+  wlr_scene_rect_set_size(client->border[1], client->bw, height);
+  wlr_scene_node_set_position(&client->border[1]->node, 0, 0);
+  //b
+  wlr_scene_rect_set_size(client->border[2], width, client->bw);
+  wlr_scene_node_set_position(&client->border[2]->node, 0, height - client->bw);
+  //r
+  wlr_scene_rect_set_size(client->border[3], client->bw, height);
+  wlr_scene_node_set_position(&client->border[3]->node, width - client->bw, 0);
+}
+
 void arrangelayers(struct Monitor *mon){
   if(!mon) return;
+
+  mon->m = (struct wlr_box){
+    .x = 0,
+    .y = 0,
+    .width = mon->wlr_output->width,
+    .height = mon->wlr_output->height
+  };
+
   for(int i = 0; i < 4; i++){
     struct LayerSurface *layer;
     wl_list_for_each(layer, &mon->layers[i], link){
@@ -724,11 +750,29 @@ void cursormove(){
   if(gclient == NULL) return;
   struct Client *client = gclient; 
   wlr_scene_node_set_position(&client->scene_tree->node, cursor->x - grab_x, cursor->y - grab_y);
+  if(client->type == X11){
+    updateborders(client, client->surface.xwayland->width, client->surface.xwayland->height);
+  }
+  else{
+    updateborders(client, client->surface.xdg->current.geometry.width, client->surface.xdg->current.geometry.height);
+  }
 }
 
 void cursorresize(){
-  // TODO : good resize
-  return;
+  if(gclient == NULL) return;
+  struct Client *client = gclient;
+  int new_width = cursor->x - client->scene_tree->node.x;
+  int new_height = cursor->y - client->scene_tree->node.y;
+  if(new_width >= 50 && new_height >= 50){
+    wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, new_width, new_height);
+    updateborders(client, new_width, new_height);
+  }
+#ifdef XWAYLAND
+  else if(client->type == X11){
+    wlr_xwayland_surface_configure(client->surface.xwayland, client->scene_tree->node.x, client->scene_tree->node.y, new_width, new_height);
+  }
+#endif
+  updateborders(client, new_width, new_height);
 }
 
 void processcursormotion(uint32_t time){
@@ -868,6 +912,12 @@ void mapnotify(struct wl_listener *listener, void *data){
     wlr_scene_xdg_surface_create(client->scene_tree, client->surface.xdg)
     : wlr_scene_subsurface_tree_create(client->scene_tree, client->surface.xwayland->surface);
   client->scene_tree->node.data = client->scene_surface->node.data = client;
+
+  for(int i = 0; i < 4; i++){
+    client->border[i] = wlr_scene_rect_create(client->scene_tree, 0, 0, focused_border_color);
+    client->border[i]->node.data = client;
+  }
+
   wl_list_insert(&clients, &client->link);
 }
 
@@ -894,6 +944,12 @@ void destroynotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, destroy);
   if(seat->keyboard_state.focused_surface == client->surface.xdg->surface){
     wlr_seat_keyboard_clear_focus(seat);
+  }
+
+  if(client->border[0]){
+    for(int i = 0; i <= 3; i++){
+      wlr_scene_node_destroy(&client->border[i]->node);
+    }
   }
   wl_list_remove(&client->map.link);
   wl_list_remove(&client->unmap.link);
@@ -942,6 +998,10 @@ void newclient(struct wl_listener *listener, void *data){
   client->type = XDGShell;
   client->mon = current_monitor;
   focused_client = client; // TODO : temp fix, maybe move somewhere else, same with x11
+  client->bw = 2;
+  for(int i = 0; i < 4; i++){
+    client->border[i] = NULL;
+  }
 
   client->map.notify = mapnotify;
   wl_signal_add(&toplevel->base->surface->events.map, &client->map);
@@ -1076,7 +1136,25 @@ void xwaylandready(struct wl_listener *listener, void *data){
   }
 }
 
+void
+handlesig(int signo)
+{
+	if (signo == SIGCHLD)
+		while (waitpid(-1, NULL, WNOHANG) > 0);
+	else if (signo == SIGINT || signo == SIGTERM)
+		quit();
+}
+
+
 void init(){
+  int renderer_fd, i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE};
+	struct sigaction sa = {.sa_flags = SA_RESTART, .sa_handler = handlesig};
+	sigemptyset(&sa.sa_mask);
+
+	for(i = 0; i < (int)LENGTH(sig); i++){
+		sigaction(sig[i], &sa, NULL);
+  }
+
   wlr_log_init(WLR_DEBUG, NULL);  
   display = wl_display_create();
   if(!(backend = wlr_backend_autocreate(wl_display_get_event_loop(display), NULL))){
@@ -1094,7 +1172,6 @@ void init(){
 		wlr_drm_create(display, renderer);
 		wlr_scene_set_linux_dmabuf_v1(scene, wlr_linux_dmabuf_v1_create_with_renderer(display, 5, renderer));
 	}
-  int renderer_fd;
 	if((renderer_fd = wlr_renderer_get_drm_fd(renderer)) >= 0
       && renderer->features.timeline && backend->features.timeline){
 		wlr_linux_drm_syncobj_manager_v1_create(display, 1, renderer_fd);
@@ -1157,6 +1234,7 @@ void init(){
 	drag_icon = wlr_scene_tree_create(&scene->tree);
 	wlr_scene_node_place_below(&drag_icon->node, &layers[LyrBlock]->node);
 
+  current_desktop = 1;
 
   wl_list_init(&mons);
   wl_signal_add(&backend->events.new_output, &new_output);
@@ -1182,7 +1260,7 @@ void run(){
     fprintf(stderr, "failed to init a socket\n");
     exit(1);
   }
-  setenv("WAYLAND_DISPLAY", socket, true);
+  setenv("WAYLAND_DISPLAY", socket, 1);
   if(!wlr_backend_start(backend)){
     fprintf(stderr, "failed to start the backend\n");
     exit(1);

@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # untitled (pre-aplha 0.0.8)
+=======
+# untitled (pre-aplha 0.0.9)
+>>>>>>> 8fb60bb ((new): borders + crash fix)
 A minimal wayland window manager inspired by dwl  
 Why "untitled"? The state of it is so early im still not sure of what to call it  
 And well since its not even an alpha yet, wont write much here, but my TODO list  

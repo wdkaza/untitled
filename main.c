@@ -224,6 +224,7 @@ static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
+static void changeoutputlayout(struct wl_listener *listener, void *data);
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
 static void killclient(const Arg *arg);
@@ -261,6 +262,7 @@ static struct wl_listener cursor_frame = {.notify = cursorframe};
 static struct wl_listener request_set_selection = {.notify = seatsetselection};
 static struct wl_listener request_set_primary_selection = {.notify = seatsetprimaryselection};
 static struct wl_listener request_cursor = {.notify = seatrequestcursor};
+static struct wl_listener output_layout_change = {.notify = changeoutputlayout};
 static struct wl_listener new_decoration = {.notify = newdecoration};
 static struct wl_listener new_input = {.notify = createinput};
 static struct wl_listener new_client = {.notify = newclient};
@@ -402,13 +404,6 @@ static void updateborders(struct Client *client, int width, int height){
 
 void arrangelayers(struct Monitor *mon){
   if(!mon) return;
-
-  mon->m = (struct wlr_box){
-    .x = 0,
-    .y = 0,
-    .width = mon->wlr_output->width,
-    .height = mon->wlr_output->height
-  };
 
   for(int i = 0; i < 4; i++){
     struct LayerSurface *layer;
@@ -595,6 +590,17 @@ void requeststatemon(struct wl_listener *listener, void *data){
 
 void destroymon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, destroy);
+  // this is a bit retarded, i need to make a seperate function to also move the clients to the newmon, so this is a temp solution
+  // TODO
+  if(current_monitor == mon && !wl_list_empty(&mons)){
+    struct Monitor *newmon;
+    wl_list_for_each(newmon, &mons, link){
+      if(mon != newmon){
+        current_monitor = newmon;
+        break;
+      }
+    }
+  }
   wl_list_remove(&mon->request_state.link);
   wl_list_remove(&mon->frame.link);
   wl_list_remove(&mon->destroy.link);
@@ -628,8 +634,8 @@ void createmon(struct wl_listener *listener, void *data){
     mon->m.height = wlr_output->height;
   }
   mon->w = mon->m;
-  mon->m.x = 0; // TODO THIS IS VERY BAD
-  mon->m.y = 0; // TODO THIS IS VERY BAD
+  //mon->m.x = 0; // TODO THIS IS VERY BAD
+  //mon->m.y = 0; // TODO THIS IS VERY BAD
   wlr_output->data = mon;
   mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
   mon->frame.notify = rendermon; 
@@ -649,6 +655,16 @@ void createmon(struct wl_listener *listener, void *data){
   current_monitor = mon;
 }
 
+void changeoutputlayout(struct wl_listener *listener, void *data){
+  struct Monitor *mon;
+  struct wlr_output_layout_output *output = NULL;
+  wl_list_for_each(mon, &mons, link){
+    output = wlr_output_layout_get(output_layout, mon->wlr_output);
+    mon->m.x = output->x;
+    mon->m.y = output->y;
+    wlr_scene_output_set_position(mon->scene_output, output->x, output->y);
+  }
+}
 
 // from dwl
 bool keybinding(uint32_t mods, xkb_keysym_t sym)
@@ -750,6 +766,16 @@ void cursormove(){
   if(gclient == NULL) return;
   struct Client *client = gclient; 
   wlr_scene_node_set_position(&client->scene_tree->node, cursor->x - grab_x, cursor->y - grab_y);
+  struct wlr_output_layout_output *loutput;
+  struct Monitor *mon;
+  wl_list_for_each(mon, &mons, link){
+    loutput = wlr_output_layout_get(output_layout, mon->wlr_output);
+    if(!loutput) continue; 
+    if(cursor->x >= loutput->x && cursor->x <= loutput->x + loutput->output->width && cursor->y >= loutput->y && cursor->y <= loutput->y + loutput->output->height){
+      client->mon = mon;
+      break;
+    }
+  }
   if(client->type == X11){
     updateborders(client, client->surface.xwayland->width, client->surface.xwayland->height);
   }
@@ -785,6 +811,16 @@ void processcursormotion(uint32_t time){
     cursorresize();
     return;
   }
+  struct wlr_output_layout_output *loutput;
+  struct Monitor *mon;
+  wl_list_for_each(mon, &mons, link){
+    loutput = wlr_output_layout_get(output_layout, mon->wlr_output);
+    if(!loutput) return; 
+    if(cursor->x >= loutput->x && cursor->x <= loutput->x + loutput->output->width && cursor->y >= loutput->y && cursor->y <= loutput->y + loutput->output->height){
+      current_monitor = mon;
+      break;
+    }
+  }
   wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
 
   double sx, sy;
@@ -798,7 +834,6 @@ void processcursormotion(uint32_t time){
 
   if(scene_surface){
     surface = scene_surface->surface;
-
 
     wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
     wlr_seat_pointer_notify_motion(seat, time, sx, sy);
@@ -1187,6 +1222,7 @@ void init(){
   wlr_data_device_manager_create(display);
 
   output_layout = wlr_output_layout_create(display);
+  wl_signal_add(&output_layout->events.change, &output_layout_change);
   xdg_output_manager = wlr_xdg_output_manager_v1_create(display, output_layout);
   viewporter = wlr_viewporter_create(display);
 	fractional_scale = wlr_fractional_scale_manager_v1_create(display, 1);

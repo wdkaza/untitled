@@ -1,4 +1,3 @@
-#include "wlr-layer-shell-unstable-v1-protocol.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -84,6 +83,7 @@ enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock,
 
 struct Monitor{
   struct wl_list link;
+  struct Server *server;
   struct wlr_output *wlr_output;
   struct wlr_scene_output *scene_output;
   struct wl_list layers[4];
@@ -108,6 +108,7 @@ struct Monitor{
 struct Client{
   unsigned int type;
   struct wl_list link;
+  struct Server *server;
   struct Monitor *mon;
 
   struct wlr_scene_tree *scene_tree; //position/container
@@ -252,7 +253,6 @@ static struct wl_listener xwayland_ready = {.notify = xwaylandready};
 static struct wlr_xwayland *xwayland;
 #endif
 
-static struct wl_listener new_output = {.notify = createmon};
 static struct wl_listener new_layer_surface = {.notify = newlayersurface};
 static struct wl_listener cursor_motion = {.notify = cursormotion};
 static struct wl_listener cursor_motion_absolute = {.notify = cursormotionabsolute};
@@ -269,10 +269,8 @@ static struct wl_listener new_client = {.notify = newclient};
 static struct wl_listener start_drag = {.notify = startdrag};
 static struct wl_listener request_start_drag = {.notify = requeststartdrag};
 
-static struct wl_display *display;
-static struct wlr_backend *backend;
-static struct wlr_renderer *renderer;
-static struct wlr_allocator *allocator;
+
+static struct Server *server;
 static struct wlr_compositor *compositor;
 static struct wlr_scene *scene;
 static struct wlr_output_layout *output_layout;
@@ -306,6 +304,8 @@ static uint32_t current_desktop;
 struct Monitor *current_monitor;
 static struct Client *focused_client;
 
+#include "src/server.h"
+#include "src/renderer.h"
 #include "config.h"
 
 void cyclefocus(const Arg *arg){
@@ -613,7 +613,7 @@ void createmon(struct wl_listener *listener, void *data){
   struct Monitor *mon;
   struct wlr_output_state state;
   
-  wlr_output_init_render(wlr_output, allocator, renderer);
+  wlr_output_init_render(wlr_output, server->wlr_allocator, server->wlr_renderer);
   
   wlr_output_state_init(&state);
   wlr_output_state_set_enabled(&state, true);
@@ -1182,6 +1182,7 @@ handlesig(int signo)
 
 
 void init(){
+  server = calloc(1, sizeof(*server));
   int renderer_fd, i, sig[] = {SIGCHLD, SIGINT, SIGTERM, SIGPIPE};
 	struct sigaction sa = {.sa_flags = SA_RESTART, .sa_handler = handlesig};
 	sigemptyset(&sa.sa_mask);
@@ -1191,41 +1192,41 @@ void init(){
   }
 
   wlr_log_init(WLR_DEBUG, NULL);  
-  display = wl_display_create();
-  if(!(backend = wlr_backend_autocreate(wl_display_get_event_loop(display), NULL))){
+  server->display = wl_display_create();
+  if(!(server->wlr_backend = wlr_backend_autocreate(wl_display_get_event_loop(server->display), NULL))){
     printf("couldnt create backend\n");
     exit(1);
   }
   // TODO : gpureset would be nice and easy to setup;
-  if(!(renderer = wlr_renderer_autocreate(backend))){
+  if(!(server->wlr_renderer = wlr_renderer_autocreate(server->wlr_backend))){
     printf("couldnt create renderer\n");
     exit(1);
   }
   scene = wlr_scene_create();
-  wlr_renderer_init_wl_display(renderer, display);
-	if(wlr_renderer_get_texture_formats(renderer, WLR_BUFFER_CAP_DMABUF)){
-		wlr_drm_create(display, renderer);
-		wlr_scene_set_linux_dmabuf_v1(scene, wlr_linux_dmabuf_v1_create_with_renderer(display, 5, renderer));
+  wlr_renderer_init_wl_display(server->wlr_renderer, server->display);
+	if(wlr_renderer_get_texture_formats(server->wlr_renderer, WLR_BUFFER_CAP_DMABUF)){
+		wlr_drm_create(server->display, server->wlr_renderer);
+		wlr_scene_set_linux_dmabuf_v1(scene, wlr_linux_dmabuf_v1_create_with_renderer(server->display, 5, server->wlr_renderer));
 	}
-	if((renderer_fd = wlr_renderer_get_drm_fd(renderer)) >= 0
-      && renderer->features.timeline && backend->features.timeline){
-		wlr_linux_drm_syncobj_manager_v1_create(display, 1, renderer_fd);
+	if((renderer_fd = wlr_renderer_get_drm_fd(server->wlr_renderer)) >= 0
+      && server->wlr_renderer->features.timeline && server->wlr_backend->features.timeline){
+		wlr_linux_drm_syncobj_manager_v1_create(server->display, 1, renderer_fd);
   }
-  if(!(allocator = wlr_allocator_autocreate(backend, renderer))){
+  if(!(server->wlr_allocator = wlr_allocator_autocreate(server->wlr_backend, server->wlr_renderer))){
     printf("couldnt create allocator\n");
     exit(1);
   }
 
-  compositor = wlr_compositor_create(display, 6, renderer);
+  compositor = wlr_compositor_create(server->display, 6, server->wlr_renderer);
   // TODO : protocols setup here
-  wlr_subcompositor_create(display);
-  wlr_data_device_manager_create(display);
+  wlr_subcompositor_create(server->display);
+  wlr_data_device_manager_create(server->display);
 
-  output_layout = wlr_output_layout_create(display);
+  output_layout = wlr_output_layout_create(server->display);
   wl_signal_add(&output_layout->events.change, &output_layout_change);
-  xdg_output_manager = wlr_xdg_output_manager_v1_create(display, output_layout);
-  viewporter = wlr_viewporter_create(display);
-	fractional_scale = wlr_fractional_scale_manager_v1_create(display, 1);
+  xdg_output_manager = wlr_xdg_output_manager_v1_create(server->display, output_layout);
+  viewporter = wlr_viewporter_create(server->display);
+	fractional_scale = wlr_fractional_scale_manager_v1_create(server->display, 1);
   //activation = wlr_xdg_activation_v1_create(display);
 
   //wl_signal_add(&xdg_output_mgr->events.apply, &output_manager_apply);
@@ -1233,17 +1234,17 @@ void init(){
 
 
   wl_list_init(&keyboards);
-  wl_signal_add(&backend->events.new_input, &new_input);
+  wl_signal_add(&server->wlr_backend->events.new_input, &new_input);
 
 
-  seat = wlr_seat_create(display, "seat0");
+  seat = wlr_seat_create(server->display, "seat0");
   wl_signal_add(&seat->events.request_set_cursor, &request_cursor);
   wl_signal_add(&seat->events.request_set_selection, &request_set_selection);
   wl_signal_add(&seat->events.request_set_primary_selection, &request_set_primary_selection);
   wl_signal_add(&seat->events.request_start_drag, &request_start_drag);
   wl_signal_add(&seat->events.start_drag, &start_drag);
   
-  xdg_shell = wlr_xdg_shell_create(display, 6);
+  xdg_shell = wlr_xdg_shell_create(server->display, 6);
   wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
   //wl_signal_add(&xdg_shell->events.new_popup, &new_popup);
   wl_list_init(&clients);
@@ -1259,10 +1260,10 @@ void init(){
   wl_signal_add(&cursor->events.motion, &cursor_motion);
   wl_signal_add(&cursor->events.motion_absolute, &cursor_motion_absolute);
 
-  decoration_manager = wlr_xdg_decoration_manager_v1_create(display);
+  decoration_manager = wlr_xdg_decoration_manager_v1_create(server->display);
   wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
 
-  layer_shell = wlr_layer_shell_v1_create(display, 3);
+  layer_shell = wlr_layer_shell_v1_create(server->display, 3);
   wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
   for(size_t i = 0; i < NUM_LAYERS; i++){
     layers[i] = wlr_scene_tree_create(&scene->tree);
@@ -1273,12 +1274,13 @@ void init(){
   current_desktop = 1;
 
   wl_list_init(&mons);
-  wl_signal_add(&backend->events.new_output, &new_output);
+  server->new_output.notify = createmon;
+  wl_signal_add(&server->wlr_backend->events.new_output, &server->new_output);
 
   // for xwayland
   unsetenv("DISPLAY");
 #ifdef XWAYLAND
-  if((xwayland = wlr_xwayland_create(display, compositor, 1))){
+  if((xwayland = wlr_xwayland_create(server->display, compositor, 1))){
 		wl_signal_add(&xwayland->events.ready, &xwayland_ready);
 		wl_signal_add(&xwayland->events.new_surface, &new_xwayland_surface);
 
@@ -1291,18 +1293,18 @@ void init(){
 }
 
 void run(){
-  const char *socket = wl_display_add_socket_auto(display);
+  const char *socket = wl_display_add_socket_auto(server->display);
   if(!socket){
     fprintf(stderr, "failed to init a socket\n");
     exit(1);
   }
   setenv("WAYLAND_DISPLAY", socket, 1);
-  if(!wlr_backend_start(backend)){
+  if(!wlr_backend_start(server->wlr_backend)){
     fprintf(stderr, "failed to start the backend\n");
     exit(1);
   }
 	wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
-  wl_display_run(display);
+  wl_display_run(server->display);
 }
 
 void quit(){
@@ -1311,15 +1313,15 @@ void quit(){
 	wlr_xwayland_destroy(xwayland);
 	xwayland = NULL;
 #endif
-  wl_display_destroy_clients(display); 
+  wl_display_destroy_clients(server->display); 
 	wlr_xcursor_manager_destroy(cursor_manager);
-  wlr_backend_destroy(backend);
-  wl_display_destroy(display); 
+  wlr_backend_destroy(server->wlr_backend);
+  wl_display_destroy(server->display); 
   wlr_scene_node_destroy(&scene->tree.node);
 }
 
 void destroylisteners(){
-	wl_list_remove(&new_output.link);
+	wl_list_remove(&server->new_output.link);
 }
 
 int main(){

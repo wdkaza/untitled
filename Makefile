@@ -16,7 +16,7 @@ ifeq ($(ASAN),1)
     LDFLAGS += -fsanitize=address
 endif
 
-OBJS = main.o
+OBJS = main.o src/renderer.o
 
 all: main
 
@@ -24,6 +24,9 @@ main: $(OBJS)
 	$(CC) $(OBJS) $(LDFLAGS) $(LIBS) -Wl,-rpath,/usr/local/lib -o $@
 
 main.o: main.c
+	$(CC) -c $< $(CFLAGS) -o $@
+
+renderer.o: src/renderer.c src/renderer.h
 	$(CC) -c $< $(CFLAGS) -o $@
 
 clean:

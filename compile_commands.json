@@ -1,10 +1,8 @@
 [
   {
-    "file": "main.c",
     "arguments": [
-      "cc",
+      "/usr/bin/cc",
       "-c",
-      "main.c",
       "-g",
       "-Werror",
       "-DWLR_USE_UNSTABLE",
@@ -15,9 +13,32 @@
       "-I/usr/src/debug/wlroots-asan-git/build/protocol",
       "-fsanitize=address",
       "-o",
-      "main.o"
+      "main.o",
+      "main.c"
     ],
     "directory": "/home/wdkaza/code/untitled",
-    "output": "main.o"
+    "file": "/home/wdkaza/code/untitled/main.c",
+    "output": "/home/wdkaza/code/untitled/main.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/cc",
+      "-g",
+      "-Werror",
+      "-DWLR_USE_UNSTABLE",
+      "-DXWAYLAND",
+      "-I/usr/include/wlroots-0.20",
+      "-I/usr/include/pixman-1",
+      "-I/usr/include/libdrm",
+      "-I/usr/src/debug/wlroots-asan-git/build/protocol",
+      "-fsanitize=address",
+      "-c",
+      "-o",
+      "src/renderer.o",
+      "src/renderer.c"
+    ],
+    "directory": "/home/wdkaza/code/untitled",
+    "file": "/home/wdkaza/code/untitled/src/renderer.c",
+    "output": "/home/wdkaza/code/untitled/src/renderer.o"
   }
 ]

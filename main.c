@@ -81,6 +81,8 @@ enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize};
 enum { XDGShell, LayerShell, X11 };
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock, NUM_LAYERS };
 
+#include "src/monitor.h"
+/*
 struct Monitor{
   struct wl_list link;
   struct Server *server;
@@ -104,7 +106,7 @@ struct Monitor{
   struct wl_listener request_state;
   struct wl_listener destroy;
 };
-
+*/
 struct Client{
   unsigned int type;
   struct wl_list link;

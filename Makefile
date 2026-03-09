@@ -1,17 +1,22 @@
 PKG_CONFIG ?= pkg-config
-PKGS = wlroots-0.20 wayland-server xkbcommon xwayland
+PKGS = wayland-server xkbcommon xwayland
 
 # TODO : remake makefile myself, this was done by chatgpt bcs i couldnt compile for some reason, maybe switch to meson
+# another comment,: holy moly this makefile is the worst, i will not make the repo public until it looks good and made by me(comment to whoever could be reading my old commits :D),
+# lesson learned dont trust chatgpt with anything
+WLROOTS_BUILD = /home/wdkaza/packages/wlroots/build
 CFLAGS_PKG_CONFIG = $(shell $(PKG_CONFIG) --cflags $(PKGS))
-CFLAGS_PKG_CONFIG += -I/usr/src/debug/wlroots-asan-git/wlroots-asan-git/include
-CFLAGS_PKG_CONFIG += -I/usr/src/debug/wlroots-asan-git/build
-CFLAGS_PKG_CONFIG += -I/usr/src/debug/wlroots-asan-git/build/protocol
-LIBS = $(shell $(PKG_CONFIG) --libs $(PKGS) xcb-icccm)
+CFLAGS_PKG_CONFIG += -I/home/wdkaza/packages/wlroots/include
+CFLAGS_PKG_CONFIG += -I$(WLROOTS_BUILD)
+CFLAGS_PKG_CONFIG += -I$(WLROOTS_BUILD)/protocol
+CFLAGS_PKG_CONFIG += -I/usr/include/pixman-1
+CFLAGS_PKG_CONFIG += -I/home/wdkaza/packages/wlroots/build/include
+LIBS = $(shell $(PKG_CONFIG) --libs $(PKGS) xcb-icccm) -lGLESv2 -lwlroots-0.20 -lpixman-1
+LDFLAGS += -L$(WLROOTS_BUILD) -Wl,-rpath,$(WLROOTS_BUILD)
 
 ASAN ?= 1
 
 CFLAGS += -g -Werror -DWLR_USE_UNSTABLE -DXWAYLAND $(CFLAGS_PKG_CONFIG)
-LDFLAGS :=
 
 ifeq ($(ASAN),1)
     CFLAGS += -fsanitize=address

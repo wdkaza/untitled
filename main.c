@@ -1,3 +1,4 @@
+#include "pixman.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -572,18 +573,66 @@ void newdecoration(struct wl_listener *listener, void *data){
   client->decoration_destroy.notify = decoration_destroy;
   wl_signal_add(&client->decoration->events.destroy, &client->decoration_destroy);
 }
-
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
-  struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(scene, mon->wlr_output);
 
-  wlr_scene_output_commit(scene_output, NULL);
-  
+  mw_renderer_begin(server->mw_renderer, mon);
+  float color[4] = {1.0, 0.0, 0.0, 1.0}; // tempoarry
+  struct wlr_render_rect_options rect = {
+    .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
+    .color = {.r = color[0], .g = color[1], .b = color[2], .a = color[3]},
+  };
+
+  wlr_render_pass_add_rect(server->mw_renderer->pass, &rect);
+
+  struct Client *client;
+  wl_list_for_each(client, &clients, link){
+    struct wlr_surface *surface = NULL;
+    struct wlr_texture *texture = NULL;
+    if(client->type == X11){
+      if(!client->surface.xwayland->surface) continue;
+      surface = client->surface.xwayland->surface;
+    }
+    else{
+      if(!client->surface.xdg->surface) continue;
+      surface = client->surface.xdg->surface;
+    }
+
+    if(!surface || !surface->mapped) continue;
+    texture = wlr_surface_get_texture(surface);
+    if(!texture) continue;
+
+    struct wlr_box box = {
+      .x = client->scene_tree->node.x,
+      .y = client->scene_tree->node.y,
+      .width = surface->current.width,
+      .height = surface->current.height,
+    };
+
+    pixman_region32_t damage;
+    pixman_region32_init(&damage);
+    pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
+
+    wm_renderer_render_texture_at(server->mw_renderer, &damage, surface, texture, &box, 1.0, &box, 0.0, 0.0);
+    pixman_region32_fini(&damage);
+  }
+
+  pixman_region32_t damage;
+  pixman_region32_init(&damage);
+  pixman_region32_union_rect(&damage, &damage, 0,0 , mon->wlr_output->width, mon->wlr_output->height);
+  mw_renderer_end(server->mw_renderer, &damage, mon);
+  pixman_region32_fini(&damage);
+
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
-  wlr_scene_output_send_frame_done(scene_output, &now);
+  struct Client *client2;
+  wl_list_for_each(client2, &clients, link){
+    struct wlr_surface *surface = client2->type == X11 ? client2->surface.xwayland->surface : client2->surface.xdg->surface;
+    if(surface && surface->mapped){
+      wlr_surface_send_frame_done(surface, &now);
+    }
+  }
 }
-
 void requeststatemon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, request_state);
   struct wlr_output_event_request_state *event = data;
@@ -614,33 +663,30 @@ void createmon(struct wl_listener *listener, void *data){
   struct wlr_output *wlr_output = data;
   struct Monitor *mon;
   struct wlr_output_state state;
-  
-  wlr_output_init_render(wlr_output, server->wlr_allocator, server->wlr_renderer);
-  
-  wlr_output_state_init(&state);
-  wlr_output_state_set_enabled(&state, true);
-  wlr_output_state_set_mode(&state, wlr_output_preferred_mode(wlr_output));
-  
-  wlr_output_commit_state(wlr_output, &state);
-  wlr_output_state_finish(&state);
 
   mon = calloc(1, sizeof(*mon));
   mon->wlr_output = wlr_output;
+
+  mw_renderer_init_output(server->mw_renderer, mon);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
+
+  wlr_output_state_init(&state);
+  wlr_output_state_set_enabled(&state, true);
+  wlr_output_state_set_mode(&state, mode);
+  wlr_output_commit_state(wlr_output, &state);
+  wlr_output_state_finish(&state);
+
   if(mode){
-    mon->m.width = mode->width;
-    mon->m.height = mode->height;
-  }
-  else{
-    mon->m.width = wlr_output->width;
-    mon->m.height = wlr_output->height;
+      mon->m.width = mode->width;
+      mon->m.height = mode->height;
+  } else {
+      mon->m.width = wlr_output->width;
+      mon->m.height = wlr_output->height;
   }
   mon->w = mon->m;
-  //mon->m.x = 0; // TODO THIS IS VERY BAD
-  //mon->m.y = 0; // TODO THIS IS VERY BAD
   wlr_output->data = mon;
   mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
-  mon->frame.notify = rendermon; 
+  mon->frame.notify = rendermon;
   wl_signal_add(&wlr_output->events.frame, &mon->frame);
   mon->request_state.notify = requeststatemon;
   wl_signal_add(&wlr_output->events.request_state, &mon->request_state);
@@ -648,10 +694,10 @@ void createmon(struct wl_listener *listener, void *data){
   wl_signal_add(&wlr_output->events.destroy, &mon->destroy);
 
   for(size_t i = 0; i < 4; i++){
-    wl_list_init(&mon->layers[i]);
+      wl_list_init(&mon->layers[i]);
   }
 
-  wl_list_insert(&mons, &mon->link); 
+  wl_list_insert(&mons, &mon->link);
 
   wlr_output_layout_add_auto(output_layout, wlr_output);
   current_monitor = mon;
@@ -1159,9 +1205,10 @@ void newclientx11(struct wl_listener *listener, void *data){
 }
 
 void xwaylandready(struct wl_listener *listener, void *data){
+  return;// BUG!!!!!!! TODO 
+  /*
   struct wlr_xcursor *xcursor;
   wlr_xwayland_set_seat(xwayland, seat);
-
   if((xcursor = wlr_xcursor_manager_get_xcursor(cursor_manager, "default", 1))){
     wlr_xwayland_set_cursor(xwayland,
                             xcursor->images[0]->buffer,
@@ -1171,6 +1218,7 @@ void xwaylandready(struct wl_listener *listener, void *data){
                             xcursor->images[0]->hotspot_x,
                             xcursor->images[0]->hotspot_y);
   }
+  */
 }
 
 void
@@ -1204,6 +1252,10 @@ void init(){
     printf("couldnt create renderer\n");
     exit(1);
   }
+
+  server->mw_renderer = calloc(1, sizeof(*server->mw_renderer));
+  mw_renderer_init(server->mw_renderer, server);
+
   scene = wlr_scene_create();
   wlr_renderer_init_wl_display(server->wlr_renderer, server->display);
 	if(wlr_renderer_get_texture_formats(server->wlr_renderer, WLR_BUFFER_CAP_DMABUF)){

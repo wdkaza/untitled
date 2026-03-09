@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "render/egl.h"
 #include "render/gles2.h"
 #include "server.h"
 
@@ -11,9 +12,18 @@
 
 void mw_renderer_init(struct mw_renderer *renderer, struct Server *server){
   renderer->server = server;
-  renderer->wlr_renderer = wlr_renderer_autocreate(server->wlr_backend);
+  renderer->wlr_renderer = server->wlr_renderer;
 
-  wlr_renderer_init_wl_display(renderer->wlr_renderer, server->display);
+  //wlr_renderer_init_wl_display(renderer->wlr_renderer, server->display);
+
+  renderer->n_texture_shaders = 0;
+  renderer->texture_shaders = NULL;
+  if(wlr_renderer_is_gles2(renderer->wlr_renderer)){
+    struct wlr_gles2_renderer *r = gles2_get_renderer(renderer->wlr_renderer);
+    assert(wlr_egl_make_current(r->egl, NULL));
+    mw_renderer_init_quad_shaders(renderer);
+    wlr_egl_unset_current(r->egl);
+  }
 }
 
 
@@ -96,7 +106,8 @@ void mw_renderer_link_texture_shader(struct mw_renderer *renderer, struct mw_ren
 
   shader->proj = glGetUniformLocation(shader->shader, "proj");
   shader->tex = glGetUniformLocation(shader->shader, "tex");
-  shader->alpha = glGetUniformLocation(shader->shader, "offset_x");
+  shader->alpha = glGetUniformLocation(shader->shader, "alpha");
+  shader->offset_x = glGetUniformLocation(shader->shader, "offset_x");
   shader->offset_y = glGetUniformLocation(shader->shader, "offset_y");
   shader->scale_x = glGetUniformLocation(shader->shader, "scale_x");
   shader->scale_y = glGetUniformLocation(shader->shader, "scale_y");
@@ -122,11 +133,20 @@ void wm_renderer_render_texture_at(struct mw_renderer *renderer,
                                    struct wlr_box *box, double opacity,
                                    struct wlr_box *mask,
                                    double corner_radius, double lock_perc){
-  int ow, oh;
-  wlr_output_transformed_resolution(renderer->current->wlr_output, &ow, &oh);
-
-  float matrix[9];
-  // todo : left off here
+  struct wlr_fbox fbox;
+  fbox.x = 0;
+  fbox.y = 0;
+  fbox.width = texture->width;
+  fbox.height = texture->height;
+  
+  float alpha = (float)opacity;
+  wlr_render_pass_add_texture(renderer->pass, &(struct wlr_render_texture_options){
+    .texture = texture,
+    .src_box = fbox,
+    .dst_box = *box,
+    .alpha = &alpha,
+    .clip = damage,
+  });
 }
 
 int mw_renderer_init_output(struct mw_renderer *renderer, struct Monitor *output){
@@ -135,4 +155,19 @@ int mw_renderer_init_output(struct mw_renderer *renderer, struct Monitor *output
 
 void mw_renderer_destroy(struct mw_renderer *renderer){
   wlr_renderer_destroy(renderer->wlr_renderer);
+}
+
+void mw_renderer_begin(struct mw_renderer *renderer, struct Monitor *output){
+  renderer->current = output;
+  wlr_output_state_init(&renderer->state);
+  renderer->pass = wlr_output_begin_render_pass(output->wlr_output, &renderer->state, NULL);
+}
+
+void mw_renderer_end(struct mw_renderer *renderer, pixman_region32_t *damage, struct Monitor *output){
+  wlr_output_add_software_cursors_to_render_pass(output->wlr_output, renderer->pass, damage);
+  wlr_render_pass_submit(renderer->pass);
+  wlr_output_commit_state(output->wlr_output, &renderer->state);
+  wlr_output_state_finish(&renderer->state);
+  renderer->pass = NULL;
+  renderer->current = NULL;
 }

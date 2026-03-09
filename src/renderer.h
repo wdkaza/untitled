@@ -10,6 +10,25 @@
 
 #include "monitor.h"
 
+static const GLchar quad_vertex_src[] = 
+  "#version 330\n"
+  "attribute vec2 pos;\n"
+  "attribute vec2 texcoord;\n"
+  "varying vec2 v_texcoord;\n"
+  "void main(){\n"
+  "  gl_Position = vec4(pos, 0.0, 1.0);\n"
+  "  v_texcoord = texcoord;\n"
+  "}\n";
+
+static const GLchar quad_fragment[] = 
+  "#version 330\n"
+  "precision mediump float;\n"
+  "uniform sampler2D tex;\n"
+  "varying vec2 v_texcoord;\n"
+  "void main(){\n"
+  "  gl_FragColor = texture2D(tex, v_texcoord);\n"
+  "}\n";
+
 struct quad_shader{
   GLuint shader;
   GLint tex;
@@ -48,6 +67,9 @@ struct mw_renderer{
   struct Monitor *current;
   struct quad_shader quad_shader;
 
+  struct wlr_render_pass *pass;
+  struct wlr_output_state state;
+
   int n_texture_shaders;
   struct mw_renderer_texture_shaders *texture_shaders;
   //renderer mode;
@@ -64,6 +86,7 @@ void mw_renderer_add_texture_shaders(struct mw_renderer* renderer, const char* n
         const GLchar* frag_src_ext);
 void mw_renderer_link_texture_shader(struct mw_renderer *renderer, struct mw_renderer_texture_shader *shader, const GLchar *vert_src, const GLchar *frag_src);
 void mw_renderer_init_quad_shaders(struct mw_renderer *renderer);
+
 /*
 void wm_renderer_init_primitive_shaders(struct mw_renderer* renderer, int n_shaders);
 void wm_renderer_add_primitive_shader(struct mw_renderer* renderer, const char* name, const GLchar* vert_src, const GLchar* frag_src, int n_params_int, int n_params_float);
@@ -80,3 +103,5 @@ void wm_renderer_render_texture_at(struct mw_renderer *renderer,
 void mw_renderer_init(struct mw_renderer *renderer, struct Server *server);
 int mw_renderer_init_output(struct mw_renderer *renderer, struct Monitor *output);
 void mw_renderer_destroy(struct mw_renderer *renderer);
+void mw_renderer_begin(struct mw_renderer *renderer, struct Monitor *output);
+void mw_renderer_end(struct mw_renderer *renderer, pixman_region32_t *damage, struct Monitor *output);

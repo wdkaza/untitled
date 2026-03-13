@@ -5,29 +5,67 @@
 #include <wlr/backend/libinput.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <util/matrix.h>
 #include <render/gles2.h>
 #include <GLES3/gl32.h>
 
 #include "monitor.h"
 
-static const GLchar quad_vertex_src[] = 
-  "#version 330\n"
-  "attribute vec2 pos;\n"
-  "attribute vec2 texcoord;\n"
-  "varying vec2 v_texcoord;\n"
-  "void main(){\n"
-  "  gl_Position = vec4(pos, 0.0, 1.0);\n"
-  "  v_texcoord = texcoord;\n"
-  "}\n";
+static const GLchar quad_vertex_src[] = "";
 
-static const GLchar quad_fragment[] = 
-  "#version 330\n"
-  "precision mediump float;\n"
-  "uniform sampler2D tex;\n"
-  "varying vec2 v_texcoord;\n"
-  "void main(){\n"
-  "  gl_FragColor = texture2D(tex, v_texcoord);\n"
-  "}\n";
+static const GLchar quad_fragment[] = "";
+
+static const GLchar texture_vertex_src[] =
+"uniform mat3 proj;\n"
+"attribute vec2 pos;\n"
+"attribute vec2 texcoord;\n"
+"varying vec2 v_texcoord;\n"
+"void main() {\n"
+"  gl_Position = vec4(proj * vec3(pos, 1.0), 1.0);\n"
+"  gl_Position.y = -gl_Position.y;\n"
+"  v_texcoord = texcoord;\n"
+"}\n";
+
+static const GLchar texture_fragment_rgba[] =
+"precision mediump float;\n"
+"uniform sampler2D tex;\n"
+"uniform float alpha;\n"
+"uniform float width;\n"
+"uniform float height;\n"
+"varying vec2 v_texcoord;\n"
+"void main() {\n"
+"  vec4 color = texture2D(tex, v_texcoord);\n"
+"  color.rgb = mix(color.rgb, vec3(0.0, 1.0, 0.0), 0.5);\n"
+"  gl_FragColor = color * alpha;\n"
+"}\n";
+
+static const GLchar texture_fragment_rgbx[] =
+"precision mediump float;\n"
+"uniform sampler2D tex;\n"
+"uniform float alpha;\n"
+"uniform float width;\n"
+"uniform float height;\n"
+"varying vec2 v_texcoord;\n"
+"void main() {\n"
+"    vec4 color = texture2D(tex, v_texcoord);\n"
+"    color.a = 1.0;\n"
+"    color.rgb = mix(color.rgb, vec3(0.0, 0.0, 1.0), 0.5);\n"
+"    gl_FragColor = color * alpha;\n"
+"}\n";
+
+static const GLchar texture_fragment_ext[] =
+"#extension GL_OES_EGL_image_external : require\n"
+"precision mediump float;\n"
+"uniform samplerExternalOES tex;\n"
+"uniform float alpha;\n"
+"uniform float width;\n"
+"uniform float height;\n"
+"varying vec2 v_texcoord;\n"
+"void main() {\n"
+"    vec4 color = texture2D(tex, v_texcoord);\n"
+"    color.rgb = mix(color.rgb, vec3(1.0, 0.0, 0.0), 0.5);\n"
+"    gl_FragColor = color * alpha;\n"
+"}\n";
 
 struct quad_shader{
   GLuint shader;
@@ -64,7 +102,7 @@ struct mw_renderer_texture_shaders{
 struct mw_renderer{
   struct Server *server;
   struct wlr_renderer *wlr_renderer;
-  struct Monitor *current;
+  struct Monitor *current;// current means current monitor, a bit confusing
   struct quad_shader quad_shader;
 
   struct wlr_render_pass *pass;
@@ -92,13 +130,23 @@ void wm_renderer_init_primitive_shaders(struct mw_renderer* renderer, int n_shad
 void wm_renderer_add_primitive_shader(struct mw_renderer* renderer, const char* name, const GLchar* vert_src, const GLchar* frag_src, int n_params_int, int n_params_float);
 */
 
-void wm_renderer_render_texture_at(struct mw_renderer *renderer,
+void mw_renderer_render_texture_at(struct mw_renderer *renderer,
                                    pixman_region32_t *damage,
                                    struct wlr_surface* surface,
                                    struct wlr_texture *texture,
-                                   struct wlr_box *box, double opacity,
-                                   struct wlr_box *mask,
-                                   double corner_radius, double lock_perc);
+                                   struct wlr_box *box, double opacity
+                                   );
+
+static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
+                                   struct wlr_texture *wlr_texture,
+                                   const struct wlr_fbox *box,
+                                   float alpha,
+                                   pixman_region32_t *damage,
+                                   /*const struct wlr_box *src_box,*/
+                                   const struct wlr_box *display_box
+                                   /*float alpha        */
+                                   /*float corner_radius*/);
+
 
 void mw_renderer_init(struct mw_renderer *renderer, struct Server *server);
 int mw_renderer_init_output(struct mw_renderer *renderer, struct Monitor *output);

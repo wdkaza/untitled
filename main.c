@@ -1,4 +1,5 @@
 #include "pixman.h"
+#include "render/gles2.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -576,8 +577,10 @@ void newdecoration(struct wl_listener *listener, void *data){
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
 
+  glClearColor(0.0, 0.0, 0.0, 1.0);
+  glClear(GL_COLOR_BUFFER_BIT);
   mw_renderer_begin(server->mw_renderer, mon);
-  float color[4] = {1.0, 0.0, 0.0, 1.0}; // tempoarry
+  float color[4] = {0.0, 0.0, 0.0, 1.0}; // tempoarry
   struct wlr_render_rect_options rect = {
     .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
     .color = {.r = color[0], .g = color[1], .b = color[2], .a = color[3]},
@@ -613,7 +616,7 @@ void rendermon(struct wl_listener *listener, void *data){
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
 
-    wm_renderer_render_texture_at(server->mw_renderer, &damage, surface, texture, &box, 1.0, &box, 0.0, 0.0);
+    mw_renderer_render_texture_at(server->mw_renderer, &damage, surface, texture, &box, 1.0);
     pixman_region32_fini(&damage);
   }
 

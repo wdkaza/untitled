@@ -89,6 +89,8 @@ struct mw_renderer_texture_shader{
   GLint scale_y;
   GLint width;
   GLint height;
+
+  GLint time;
 };
 
 struct mw_renderer_texture_shaders{
@@ -107,6 +109,8 @@ struct mw_renderer{
 
   struct wlr_render_pass *pass;
   struct wlr_output_state state;
+
+  float time;
 
   int n_texture_shaders;
   struct mw_renderer_texture_shaders *texture_shaders;

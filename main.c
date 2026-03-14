@@ -589,7 +589,7 @@ void rendermon(struct wl_listener *listener, void *data){
   wlr_render_pass_add_rect(server->mw_renderer->pass, &rect);
 
   struct Client *client;
-  wl_list_for_each(client, &clients, link){
+  wl_list_for_each_reverse(client, &clients, link){// reverse to fix the z order/stacking whatever you call it
     struct wlr_surface *surface = NULL;
     struct wlr_texture *texture = NULL;
     if(client->type == X11){

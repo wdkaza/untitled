@@ -6,6 +6,7 @@
 
 #include <GLES2/gl2.h>
 #include <assert.h>
+#include <bits/time.h>
 #include <wayland-server-protocol.h>
 #include <wlr/backend.h>
 #include <wlr/backend/libinput.h>
@@ -135,6 +136,7 @@ void mw_renderer_link_texture_shader(struct mw_renderer *renderer, struct mw_ren
   shader->scale_y = glGetUniformLocation(shader->shader, "scale_y");
   shader->width = glGetUniformLocation(shader->shader, "width");
   shader->height = glGetUniformLocation(shader->shader, "height");
+  shader->time = glGetUniformLocation(shader->shader, "time");
 
   shader->pos_attrib = glGetAttribLocation(shader->shader, "pos");
   shader->tex_attrib = glGetAttribLocation(shader->shader, "texcoord");
@@ -199,6 +201,7 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 	glUniform1f(shader->alpha, alpha);
 	glUniform1f(shader->width, display_box->width);
 	glUniform1f(shader->height, display_box->height);
+  //glUniform1f(shader->time, renderer->time);
 	//glUniform1f(shader->cornerradius, corner_radius);
 
 	const GLfloat x1 = box->x / wlr_texture->width;
@@ -273,6 +276,9 @@ void mw_renderer_destroy(struct mw_renderer *renderer){
 }
 
 void mw_renderer_begin(struct mw_renderer *renderer, struct Monitor *output){
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+  //renderer->time = time; todo some math
   renderer->current = output;
   wlr_output_state_init(&renderer->state);
   renderer->pass = wlr_output_begin_render_pass(output->wlr_output, &renderer->state, NULL);

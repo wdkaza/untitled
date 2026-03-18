@@ -17,6 +17,7 @@ LDFLAGS += -L$(WLROOTS_BUILD) -Wl,-rpath,$(WLROOTS_BUILD)
 ASAN ?= 1
 
 CFLAGS += -g -Werror -DWLR_USE_UNSTABLE -DXWAYLAND $(CFLAGS_PKG_CONFIG)
+CFLAGS += -Isrc
 
 ifeq ($(ASAN),1)
     CFLAGS += -fsanitize=address

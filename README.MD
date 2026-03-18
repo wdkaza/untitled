@@ -8,7 +8,7 @@ And well since its not even an alpha yet, wont write much here, but my TODO list
 - [ ] simple shaders support :o
 - [x] basic window managment
 - [ ] moving/resizing windows
-- [ ] fullscreen feature and more
+- [x] fullscreen feature
 - [ ] amazing(hopefully) monitor layout support
 - [x] basic config in a .h file for now
 - [x] layers support

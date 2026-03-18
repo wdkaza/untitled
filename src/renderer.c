@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "pixman.h"
 #include "render/egl.h"
 #include "render/gles2.h"
 #include "server.h"
@@ -13,7 +14,7 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 
-// massive thanks to https://github.com/jbuchermn/pywm renderer
+// massive thanks to https://github.com/jbuchermn/pywm aka newm renderer
 // i would have not done it wihtout scraping half of the code from there
 // its pretty much the same code but updated for wlroots 0.20 and WAY worse lol
 
@@ -136,7 +137,6 @@ void mw_renderer_link_texture_shader(struct mw_renderer *renderer, struct mw_ren
   shader->scale_y = glGetUniformLocation(shader->shader, "scale_y");
   shader->width = glGetUniformLocation(shader->shader, "width");
   shader->height = glGetUniformLocation(shader->shader, "height");
-  shader->time = glGetUniformLocation(shader->shader, "time");
 
   shader->pos_attrib = glGetAttribLocation(shader->shader, "pos");
   shader->tex_attrib = glGetAttribLocation(shader->shader, "texcoord");
@@ -201,7 +201,6 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 	glUniform1f(shader->alpha, alpha);
 	glUniform1f(shader->width, display_box->width);
 	glUniform1f(shader->height, display_box->height);
-  //glUniform1f(shader->time, renderer->time);
 	//glUniform1f(shader->cornerradius, corner_radius);
 
 	const GLfloat x1 = box->x / wlr_texture->width;
@@ -221,7 +220,28 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 	glEnableVertexAttribArray(shader->pos_attrib);
 	glEnableVertexAttribArray(shader->tex_attrib);
 
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  /*
+   * sometihgn wrong with it TODO : find
+  if(damage != NULL){
+    glEnable(GL_SCISSOR_TEST);
+    int nrects;
+    pixman_box32_t *rects = pixman_region32_rectangles(damage, &nrects);
+    for(int i = 0; i < nrects; i++){
+      glScissor(rects[i].x1,
+                renderer->current->wlr_output->height - rects[i].y2,
+                rects[i].x2 - rects[i].x1,
+                rects[i].y2 - rects[i].y1);
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+    glDisable(GL_SCISSOR_TEST);
+  }
+  else{
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
+  */
+
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
 
 	glDisableVertexAttribArray(shader->pos_attrib);
 	glDisableVertexAttribArray(shader->tex_attrib);
@@ -276,9 +296,6 @@ void mw_renderer_destroy(struct mw_renderer *renderer){
 }
 
 void mw_renderer_begin(struct mw_renderer *renderer, struct Monitor *output){
-  struct timespec time;
-  clock_gettime(CLOCK_MONOTONIC, &time);
-  //renderer->time = time; todo some math
   renderer->current = output;
   wlr_output_state_init(&renderer->state);
   renderer->pass = wlr_output_begin_render_pass(output->wlr_output, &renderer->state, NULL);

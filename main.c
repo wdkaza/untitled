@@ -84,6 +84,7 @@ enum { XDGShell, LayerShell, X11 };
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock, NUM_LAYERS };
 
 #include "src/monitor.h"
+
 /*
 struct Monitor{
   struct wl_list link;
@@ -125,6 +126,9 @@ struct Client{
     struct wlr_xwayland_surface *xwayland;
   } surface;
 
+  struct wlr_box prev;
+  struct wlr_box geom;
+
 
   //int isfocused;
   uint32_t desktop_index;
@@ -150,6 +154,8 @@ struct Client{
 	struct wl_listener configure;
 	struct wl_listener set_hints;
 #endif
+
+  uint32_t resize;
 };
 /* struct Popup{}; */
 
@@ -229,10 +235,12 @@ static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
+static void setfullscreen(struct Client *client, int fullscreen);
 static void changeoutputlayout(struct wl_listener *listener, void *data);
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
 static void killclient(const Arg *arg);
+static void togglefullscreen(const Arg *arg);
 static void cyclefocus(const Arg *arg);
 static void changedesktop(const Arg *arg);
 static void cursormove();
@@ -311,6 +319,7 @@ static struct Client *focused_client;
 #include "src/server.h"
 #include "src/renderer.h"
 #include "config.h"
+#include "src/client.h"
 
 void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
@@ -341,6 +350,13 @@ spawn(const Arg *arg)
 		execvp(((char **)arg->v)[0], (char **)arg->v);
     exit(1);
 	}
+}
+//
+void togglefullscreen(const Arg *arg){
+  if(focused_client == NULL) return;
+  if(focused_client){
+    setfullscreen(focused_client, !focused_client->isfullscreen);
+  }
 }
 
 void killclient(const Arg *arg){
@@ -606,8 +622,8 @@ void rendermon(struct wl_listener *listener, void *data){
     if(!texture) continue;
 
     struct wlr_box box = {
-      .x = client->scene_tree->node.x,
-      .y = client->scene_tree->node.y,
+      .x = client->scene_tree->node.x - mon->m.x,
+      .y = client->scene_tree->node.y - mon->m.y,
       .width = surface->current.width,
       .height = surface->current.height,
     };
@@ -700,6 +716,10 @@ void createmon(struct wl_listener *listener, void *data){
       wl_list_init(&mon->layers[i]);
   }
 
+  mon->fullscreen_bg = wlr_scene_rect_create(layers[LyrFS], mon->m.width, mon->m.height, fullscreen_bg);
+  wlr_scene_node_set_position(&mon->fullscreen_bg->node, mon->m.x, mon->m.y);
+  wlr_scene_node_set_enabled(&mon->fullscreen_bg->node, 0);
+
   wl_list_insert(&mons, &mon->link);
 
   wlr_output_layout_add_auto(output_layout, wlr_output);
@@ -714,6 +734,7 @@ void changeoutputlayout(struct wl_listener *listener, void *data){
     mon->m.x = output->x;
     mon->m.y = output->y;
     wlr_scene_output_set_position(mon->scene_output, output->x, output->y);
+    wlr_scene_node_set_position(&mon->fullscreen_bg->node, mon->m.x, mon->m.y);
   }
 }
 
@@ -816,7 +837,9 @@ void createinput(struct wl_listener *listener, void *data){
 void cursormove(){
   if(gclient == NULL) return;
   struct Client *client = gclient; 
-  wlr_scene_node_set_position(&client->scene_tree->node, cursor->x - grab_x, cursor->y - grab_y);
+  client->geom.x = cursor->x - grab_x;
+  client->geom.y = cursor->y - grab_y;
+  wlr_scene_node_set_position(&client->scene_tree->node, client->geom.x, client->geom.y);
   struct wlr_output_layout_output *loutput;
   struct Monitor *mon;
   wl_list_for_each(mon, &mons, link){
@@ -999,6 +1022,8 @@ void mapnotify(struct wl_listener *listener, void *data){
     : wlr_scene_subsurface_tree_create(client->scene_tree, client->surface.xwayland->surface);
   client->scene_tree->node.data = client->scene_surface->node.data = client;
 
+  client_get_geometry(client, &client->geom);
+
   for(int i = 0; i < 4; i++){
     client->border[i] = wlr_scene_rect_create(client->scene_tree, 0, 0, focused_border_color);
     client->border[i]->node.data = client;
@@ -1064,15 +1089,54 @@ void destroynotifyx11(struct wl_listener *listener, void *data){
 
 void fullscreennotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, fullscreen);
-  if(client->surface.xdg->initialized){
- 		wlr_xdg_surface_schedule_configure(client->surface.xdg);
-  }
+  setfullscreen(client, client_wants_fullscreen(client));
 }
+
 void maximizenotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, maximize);
   if(client->surface.xdg->initialized){
  		wlr_xdg_surface_schedule_configure(client->surface.xdg);
   }
+}
+
+void resize(struct Client *client, struct wlr_box geo){
+  struct wlr_box *bbox;
+  struct wlr_box clip;
+
+  if(!client->mon || !client_surface(client)->mapped){
+    return;
+  }
+
+  client->geom = geo;
+
+	wlr_scene_node_set_position(&client->scene_tree->node, client->geom.x, client->geom.y);
+	wlr_scene_node_set_position(&client->scene_surface->node, client->bw, client->bw);
+
+  client->resize = client_set_size(client, client->geom.width - 2 * client->bw, client->geom.height - 2 * client->bw);
+	client_get_clip(client, &clip);
+	wlr_scene_subsurface_tree_set_clip(&client->scene_surface->node, &clip);
+}
+
+void setfullscreen(struct Client *client, int fullscreen){
+  client->isfullscreen = fullscreen;
+  if(!client->mon || !client_surface(client)->mapped){
+    return;
+  }
+  client_set_fullscreen(client, fullscreen);
+  wlr_scene_node_reparent(&client->scene_tree->node, layers[client->isfullscreen  ? LyrFS : client->isfloating ? LyrFloat : LyrTile]);
+
+  if(fullscreen){
+    client->prev = client->geom;
+    client->bw = 0; // TODO : temporary fixing the size from border calculation since borders dont work currently anyways
+    resize(client, client->mon->m);
+  }
+  else{
+    client->bw = 0; // TODO : same as above
+    resize(client, client->prev);
+  }
+
+  // TODO : temporary, should be moved to function that arranges windows later
+	wlr_scene_node_set_enabled(&current_monitor->fullscreen_bg->node, client->isfullscreen);
 }
 
 void newclient(struct wl_listener *listener, void *data){

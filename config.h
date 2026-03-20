@@ -7,12 +7,13 @@ static const char *terminal[] = { "kitty", NULL };
 //static const float fullscreen_bg[] =; 
 static const float focused_border_color[] = {1.0f, 0.0f, 0.0f, 1.0f};
 static const float unfocused_border_color[] = {0.0f, 1.0f, 0.0f, 1.0f};
-static const float fullscreen_bg[] = {0.0f, 0.0f, 0.0f, 1.0f};
+static const float fullscreen_bg[] = {0.2f, 0.2f, 0.2f, 1.0f};
 
 static const Key keys[] = {
   {MODKEY,                    XKB_KEY_n,           spawn,            {.v = terminal} },
   {MODKEY,                    XKB_KEY_w,           cyclefocus,       {}},
   {MODKEY,                    XKB_KEY_r,           togglefullscreen, {}},
+  {MODKEY,                    XKB_KEY_q,           killclient,       {}},
   {MODKEY,                    XKB_KEY_m,           changedesktop,    {.i = 1}},
   {MODKEY,                    XKB_KEY_z,           changedesktop,    {.i = 2}},
   {MODKEY,                    XKB_KEY_3,           changedesktop,    {.i = 3}},

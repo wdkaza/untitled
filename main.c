@@ -85,31 +85,7 @@ enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock,
 
 #include "src/monitor.h"
 
-/*
-struct Monitor{
-  struct wl_list link;
-  struct Server *server;
-  struct wlr_output *wlr_output;
-  struct wlr_scene_output *scene_output;
-  struct wl_list layers[4];
-
-  struct wlr_box m; // monitor area
-  struct wlr_box w; // windows area
-
-  // TODO : per monitor specs
-  // Layout layout; 
-  //
-  // float mfact;
-  // uint32_t nmaster;
-  // bool asleep;
-
-
-
-  struct wl_listener frame;
-  struct wl_listener request_state;
-  struct wl_listener destroy;
-};
-*/
+struct mw_renderer;
 struct Client{
   unsigned int type;
   struct wl_list link;
@@ -233,6 +209,7 @@ static void requeststartdrag(struct wl_listener *listener, void *data);
 static void destroydragicon(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
+static void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfullscreen(struct Client *client, int fullscreen);
@@ -590,32 +567,57 @@ void newdecoration(struct wl_listener *listener, void *data){
   client->decoration_destroy.notify = decoration_destroy;
   wl_signal_add(&client->decoration->events.destroy, &client->decoration_destroy);
 }
+
+void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list){
+  struct LayerSurface *layer;
+  wl_list_for_each(layer, layer_list, link){
+    struct wlr_surface *surface = layer->layer_surface->surface;
+    struct wlr_texture *texture = wlr_surface_get_texture(surface);
+    if(!texture) continue;
+
+    struct wlr_box box = {
+      .x = layer->scene_tree->node.x - mon->m.x,
+      .y = layer->scene_tree->node.y - mon->m.y,
+      .width = surface->current.width,
+      .height = surface->current.height
+    };
+
+    pixman_region32_t damage;
+    pixman_region32_init(&damage);
+    pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
+    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0);
+    pixman_region32_fini(&damage);
+  }
+}
+
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
 
-  glClearColor(0.0, 0.0, 0.0, 1.0);
-  glClear(GL_COLOR_BUFFER_BIT);
+  //glClearColor(0.0, 0.0, 0.0, 1.0);
+  //glClear(GL_COLOR_BUFFER_BIT);
   mw_renderer_begin(server->mw_renderer, mon);
   float color[4] = {0.0, 0.0, 0.0, 1.0}; // tempoarry
   struct wlr_render_rect_options rect = {
     .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
     .color = {.r = color[0], .g = color[1], .b = color[2], .a = color[3]},
   };
-
   wlr_render_pass_add_rect(server->mw_renderer->pass, &rect);
+
+  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]);
+  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
 
   struct Client *client;
   wl_list_for_each_reverse(client, &clients, link){// reverse to fix the z order/stacking whatever you call it
+    if(client->isfullscreen && client->mon == mon){
+      struct wlr_render_rect_options background_rect = {
+        .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
+        .color = {.r = fullscreen_bg[0], .g = fullscreen_bg[1], .b = fullscreen_bg[2], .a = fullscreen_bg[3]},
+      };
+      wlr_render_pass_add_rect(server->mw_renderer->pass, &background_rect);
+    }
     struct wlr_surface *surface = NULL;
     struct wlr_texture *texture = NULL;
-    if(client->type == X11){
-      if(!client->surface.xwayland->surface) continue;
-      surface = client->surface.xwayland->surface;
-    }
-    else{
-      if(!client->surface.xdg->surface) continue;
-      surface = client->surface.xdg->surface;
-    }
+    surface = client_surface(client);
 
     if(!surface || !surface->mapped) continue;
     texture = wlr_surface_get_texture(surface);
@@ -635,6 +637,9 @@ void rendermon(struct wl_listener *listener, void *data){
     mw_renderer_render_texture_at(server->mw_renderer, &damage, surface, texture, &box, 1.0);
     pixman_region32_fini(&damage);
   }
+
+  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
+  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]);
 
   pixman_region32_t damage;
   pixman_region32_init(&damage);
@@ -713,12 +718,8 @@ void createmon(struct wl_listener *listener, void *data){
   wl_signal_add(&wlr_output->events.destroy, &mon->destroy);
 
   for(size_t i = 0; i < 4; i++){
-      wl_list_init(&mon->layers[i]);
+    wl_list_init(&mon->layers[i]);
   }
-
-  mon->fullscreen_bg = wlr_scene_rect_create(layers[LyrFS], mon->m.width, mon->m.height, fullscreen_bg);
-  wlr_scene_node_set_position(&mon->fullscreen_bg->node, mon->m.x, mon->m.y);
-  wlr_scene_node_set_enabled(&mon->fullscreen_bg->node, 0);
 
   wl_list_insert(&mons, &mon->link);
 
@@ -734,7 +735,6 @@ void changeoutputlayout(struct wl_listener *listener, void *data){
     mon->m.x = output->x;
     mon->m.y = output->y;
     wlr_scene_output_set_position(mon->scene_output, output->x, output->y);
-    wlr_scene_node_set_position(&mon->fullscreen_bg->node, mon->m.x, mon->m.y);
   }
 }
 
@@ -1134,9 +1134,6 @@ void setfullscreen(struct Client *client, int fullscreen){
     client->bw = 0; // TODO : same as above
     resize(client, client->prev);
   }
-
-  // TODO : temporary, should be moved to function that arranges windows later
-	wlr_scene_node_set_enabled(&current_monitor->fullscreen_bg->node, client->isfullscreen);
 }
 
 void newclient(struct wl_listener *listener, void *data){
@@ -1272,20 +1269,14 @@ void newclientx11(struct wl_listener *listener, void *data){
 }
 
 void xwaylandready(struct wl_listener *listener, void *data){
-  return;// BUG!!!!!!! TODO 
-  /*
   struct wlr_xcursor *xcursor;
   wlr_xwayland_set_seat(xwayland, seat);
   if((xcursor = wlr_xcursor_manager_get_xcursor(cursor_manager, "default", 1))){
     wlr_xwayland_set_cursor(xwayland,
-                            xcursor->images[0]->buffer,
-                            xcursor->images[0]->width * 4,
-                            xcursor->images[0]->width,
-                            xcursor->images[0]->height,
+                            wlr_xcursor_image_get_buffer(xcursor->images[0]),
                             xcursor->images[0]->hotspot_x,
                             xcursor->images[0]->hotspot_y);
   }
-  */
 }
 
 void

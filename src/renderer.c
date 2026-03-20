@@ -221,7 +221,6 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 	glEnableVertexAttribArray(shader->tex_attrib);
 
   /*
-   * sometihgn wrong with it TODO : find
   if(damage != NULL){
     glEnable(GL_SCISSOR_TEST);
     int nrects;

@@ -24,7 +24,6 @@ struct Monitor{
   // bool asleep;
 
 
-  struct wlr_scene_rect *fullscreen_bg;
 
   struct wl_listener frame;
   struct wl_listener request_state;

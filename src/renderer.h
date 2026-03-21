@@ -35,7 +35,7 @@ static const GLchar texture_fragment_rgba[] =
 "varying vec2 v_texcoord;\n"
 "void main() {\n"
 "  vec4 color = texture2D(tex, v_texcoord);\n"
-"  color.rgb = mix(color.rgb, vec3(0.0, 1.0, 0.0), 0.5);\n"
+"  color.rgb = mix(color.rgb, vec3(0.0, 0.0, 0.0), 0.0);\n"
 "  gl_FragColor = color * alpha;\n"
 "}\n";
 

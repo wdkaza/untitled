@@ -210,6 +210,7 @@ static void destroydragicon(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
+static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfullscreen(struct Client *client, int fullscreen);
@@ -297,7 +298,6 @@ static struct Client *focused_client;
 #include "src/renderer.h"
 #include "config.h"
 #include "src/client.h"
-
 void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
   struct Client *next_client = wl_container_of(clients.prev, next_client, link);
@@ -590,6 +590,33 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
   }
 }
 
+static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
+  struct wlr_subsurface *subsurface;
+  wl_list_for_each(subsurface, &surface->current.subsurfaces_below, current.link){
+    rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
+  }
+
+  struct wlr_texture *texture = wlr_surface_get_texture(surface);
+  if(texture){
+    struct wlr_box box = {
+      .x = sx,
+      .y = sy,
+      .width = surface->current.width,
+      .height = surface->current.height,
+    };
+    pixman_region32_t damage;
+    pixman_region32_init(&damage);
+    pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
+    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0);
+    pixman_region32_fini(&damage);
+  }
+
+  wl_list_for_each(subsurface, &surface->current.subsurfaces_above, current.link){
+    rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
+  }
+}
+
+
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
 
@@ -618,24 +645,16 @@ void rendermon(struct wl_listener *listener, void *data){
     struct wlr_surface *surface = NULL;
     struct wlr_texture *texture = NULL;
     surface = client_surface(client);
-
     if(!surface || !surface->mapped) continue;
-    texture = wlr_surface_get_texture(surface);
-    if(!texture) continue;
 
-    struct wlr_box box = {
-      .x = client->scene_tree->node.x - mon->m.x,
-      .y = client->scene_tree->node.y - mon->m.y,
-      .width = surface->current.width,
-      .height = surface->current.height,
-    };
+    int sx = client->scene_tree->node.x - mon->m.x;
+    int sy = client->scene_tree->node.y - mon->m.y;
 
-    pixman_region32_t damage;
-    pixman_region32_init(&damage);
-    pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
-
-    mw_renderer_render_texture_at(server->mw_renderer, &damage, surface, texture, &box, 1.0);
-    pixman_region32_fini(&damage);
+    if(client->type == XDGShell){
+      sx -= client->surface.xdg->current.geometry.x;
+      sy -= client->surface.xdg->current.geometry.y;
+    }
+    rendersurface(server->mw_renderer, mon, surface, sx, sy);
   }
 
   renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
@@ -895,12 +914,12 @@ void processcursormotion(uint32_t time){
       break;
     }
   }
-  wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
 
   double sx, sy;
   struct wlr_surface *surface = NULL;
   struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
   if(!node || node->type != WLR_SCENE_NODE_BUFFER){
+    wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
     return; 
   } 
   struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
@@ -913,6 +932,7 @@ void processcursormotion(uint32_t time){
     wlr_seat_pointer_notify_motion(seat, time, sx, sy);
   }
   else{
+    wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
     wlr_seat_pointer_clear_focus(seat);
   }
 };

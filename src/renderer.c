@@ -173,9 +173,10 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 		}
 		break;
 	case GL_TEXTURE_EXTERNAL_OES:
-        wlr_log(WLR_ERROR, "Failed to render texture: "
-            "GL_TEXTURE_EXTERNAL_OES not supported");
-        return false;
+    wlr_log(WLR_ERROR, "Failed to render texture: "
+        "GL_TEXTURE_EXTERNAL_OES not supported");
+    shader = &renderer->texture_shaders[0].ext;
+    break;
 	default:
 		abort();
 	}

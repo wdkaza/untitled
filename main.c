@@ -1,5 +1,6 @@
 #include "pixman.h"
 #include "render/gles2.h"
+#include "wlr-layer-shell-unstable-v1-protocol.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -85,6 +86,7 @@ enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock,
 
 #include "src/monitor.h"
 
+struct Monitor;
 struct mw_renderer;
 struct Client{
   unsigned int type;
@@ -182,6 +184,13 @@ struct LayerSurface{
   struct wl_listener unmap;
   struct wl_listener destroy;
 };
+
+typedef struct{
+  const char *name;
+  float scale;
+  int x, y;
+  enum wl_output_transform rotation;
+}MonitorRule;
 
 static void cursormotion(struct wl_listener *listener, void *data);
 static void seatsetselection(struct wl_listener *listener, void *data);
@@ -292,7 +301,9 @@ static struct wl_list keyboards;
 
 static uint32_t current_desktop;
 struct Monitor *current_monitor;
-static struct Client *focused_client;
+static struct Client *focused_client; // dont know if i should keep it, 
+// not a common practice in other wm's from what i saw
+
 
 #include "src/server.h"
 #include "src/renderer.h"
@@ -399,39 +410,56 @@ static void updateborders(struct Client *client, int width, int height){
   wlr_scene_node_set_position(&client->border[3]->node, width - client->bw, 0);
 }
 
+void arrangelayer(struct Monitor *mon, struct wl_list *list, struct wlr_box *usable_area, int exclusive){
+  struct LayerSurface *layer;
+  struct wlr_box full_area = mon->m;
+
+  wl_list_for_each(layer, list, link){
+    struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
+
+    if(!layer_surface->initialized){
+      continue;
+    }
+
+		if (exclusive != (layer_surface->current.exclusive_zone > 0)){
+      continue;
+    }
+
+    wlr_scene_layer_surface_v1_configure(layer->scene_layer_surface, &full_area, usable_area);
+		wlr_scene_node_set_position(&layer->popups->node, layer->scene_tree->node.x, layer->scene_tree->node.y);
+  }
+}
+
 void arrangelayers(struct Monitor *mon){
-  if(!mon) return;
+  if(!mon->wlr_output->enabled) return;
+  struct wlr_box usable_area = mon->m;
+  struct LayerSurface *layer;
+  uint32_t layers_above_shell[] = {
+    ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+    ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+  };
 
-  for(int i = 0; i < 4; i++){
-    struct LayerSurface *layer;
-    wl_list_for_each(layer, &mon->layers[i], link){
-      struct wlr_layer_surface_v1 *layer_surface = layer->layer_surface;
-      struct wlr_layer_surface_v1_state *state = &layer_surface->current;
+  for(int i = 3; i >= 0; i--){
+    arrangelayer(mon, &mon->layers[i], &usable_area, 1);
+  }
 
-      struct wlr_box box = {.width = state->desired_width, .height = state->desired_height};
-      if(box.width == 0) box.width = mon->m.width;
-      if(box.height == 0) box.height = mon->m.height;
+  if(!wlr_box_equal(&usable_area, &mon->w)){
+    mon->w = usable_area;
+    // TODO
+  }
 
-      box.x = mon->m.x;
-      box.y = mon->m.y;
+  for(int i = 3; i >= 0; i--){
+    arrangelayer(mon, &mon->layers[i], &usable_area, 0);
+  }
 
-      wlr_scene_node_set_position(&layer->scene_tree->node, box.x, box.y);
-      wlr_layer_surface_v1_configure(layer_surface, box.width, box.height);
-
-      if(state->exclusive_zone > 0){
-        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP)){
-          mon->m.y += state->exclusive_zone;
-        }
-        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM)){
-          mon->m.height -= state->exclusive_zone;
-        }
-        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT)){
-          mon->m.x += state->exclusive_zone;
-        }
-        if((state->anchor & ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT)){
-          mon->m.width -= state->exclusive_zone;
-        }
+  for(int i = 0; i < (int)LENGTH(layers_above_shell); i++){
+    wl_list_for_each_reverse(layer, &mon->layers[layers_above_shell[i]], link){
+      if(!layer->layer_surface->current.keyboard_interactive || !layer->mapped){
+        continue;
       }
+      setfocus(NULL);
+      client_notify_enter(layer->layer_surface->surface, wlr_seat_get_keyboard(seat));
+      return;
     }
   }
 }
@@ -706,6 +734,7 @@ void createmon(struct wl_listener *listener, void *data){
   struct wlr_output *wlr_output = data;
   struct Monitor *mon;
   struct wlr_output_state state;
+  const MonitorRule *rule;
 
   mon = calloc(1, sizeof(*mon));
   mon->wlr_output = wlr_output;
@@ -714,6 +743,15 @@ void createmon(struct wl_listener *listener, void *data){
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 
   wlr_output_state_init(&state);
+  for(rule = monrules; rule < END(monrules); rule++){
+    if(!rule->name || strstr(wlr_output->name, rule->name)){
+      mon->m.x = rule->x,
+      mon->m.y = rule->y,
+      wlr_output_state_set_scale(&state, rule->scale);
+      wlr_output_state_set_transform(&state, rule->rotation);
+      break;
+    }
+  }
   wlr_output_state_set_enabled(&state, true);
   wlr_output_state_set_mode(&state, mode);
   wlr_output_commit_state(wlr_output, &state);
@@ -742,7 +780,12 @@ void createmon(struct wl_listener *listener, void *data){
 
   wl_list_insert(&mons, &mon->link);
 
-  wlr_output_layout_add_auto(output_layout, wlr_output);
+  if(mon->m.x == -1 && mon->m.y == -1){
+    wlr_output_layout_add_auto(output_layout, wlr_output);
+  }
+  else{
+    wlr_output_layout_add(output_layout, wlr_output, mon->m.x, mon->m.y);
+  }
   current_monitor = mon;
 }
 
@@ -927,6 +970,20 @@ void processcursormotion(uint32_t time){
 
   if(scene_surface){
     surface = scene_surface->surface;
+    struct wlr_scene_tree *tree = node->parent;
+
+    while(tree != NULL && tree->node.data == NULL){
+      tree = tree->node.parent;
+    }
+
+    if(tree && tree->node.data){
+      void *data = tree->node.data;
+      struct LayerSurface *layer = data;
+      if(layer->type != LayerShell){
+        struct Client *client = data;
+        setfocus(client);
+      }
+    }
 
     wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
     wlr_seat_pointer_notify_motion(seat, time, sx, sy);
@@ -996,7 +1053,6 @@ void cursorbutton(struct wl_listener *listener, void *data){
         return;
       }
      
-      /*
       struct LayerSurface *layer = tree->node.data;
       if(layer->type == LayerShell){
         wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
@@ -1004,7 +1060,6 @@ void cursorbutton(struct wl_listener *listener, void *data){
         gclient = NULL;
         return;
       }
-      */
 
 
       struct Client *client = tree->node.data;

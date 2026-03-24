@@ -1,8 +1,10 @@
 [
   {
+    "file": "main.c",
     "arguments": [
-      "/usr/bin/cc",
+      "cc",
       "-c",
+      "main.c",
       "-g",
       "-Werror",
       "-DWLR_USE_UNSTABLE",
@@ -15,11 +17,9 @@
       "-Isrc",
       "-fsanitize=address",
       "-o",
-      "main.o",
-      "main.c"
+      "main.o"
     ],
     "directory": "/home/wdkaza/code/untitled",
-    "file": "/home/wdkaza/code/untitled/main.c",
-    "output": "/home/wdkaza/code/untitled/main.o"
+    "output": "main.o"
   }
 ]

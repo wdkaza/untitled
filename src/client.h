@@ -59,6 +59,15 @@ static inline void client_get_clip(struct Client *client, struct wlr_box *clip){
 	clip->y = client->surface.xdg->geometry.y;
 }
 
+static inline void client_notify_enter(struct wlr_surface *s, struct wlr_keyboard *kb){
+  if(kb){
+    wlr_seat_keyboard_notify_enter(seat, s, kb->keycodes, kb->num_keycodes, &kb->modifiers);
+  }
+  else{
+    wlr_seat_keyboard_notify_enter(seat, s, NULL, 0, NULL);
+  }
+}
+
 static inline void client_set_fullscreen(struct Client *client, int fullscreen){
 #ifdef XWAYLAND
 	if (client_is_x11(client)) {

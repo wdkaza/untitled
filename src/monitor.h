@@ -24,7 +24,6 @@ struct Monitor{
   // bool asleep;
 
 
-
   struct wl_listener frame;
   struct wl_listener request_state;
   struct wl_listener destroy;

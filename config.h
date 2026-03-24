@@ -1,5 +1,6 @@
 #pragma once
 
+#include <wayland-server-protocol.h>
 #define MODKEY WLR_MODIFIER_ALT
 
 static const char *terminal[] = { "kitty", NULL };
@@ -8,6 +9,12 @@ static const char *terminal[] = { "kitty", NULL };
 static const float focused_border_color[] = {1.0f, 0.0f, 0.0f, 1.0f};
 static const float unfocused_border_color[] = {0.0f, 1.0f, 0.0f, 1.0f};
 static const float fullscreen_bg[] = {0.2f, 0.2f, 0.2f, 1.0f};
+
+static const MonitorRule monrules[] = {
+// name, scale, x, y, rotation
+  {NULL, 1,     -1, -1, WL_OUTPUT_TRANSFORM_NORMAL},
+  {"secondmon!",2, 1, 1, WL_OUTPUT_TRANSFORM_NORMAL},
+};
 
 static const Key keys[] = {
   {MODKEY,                    XKB_KEY_n,           spawn,            {.v = terminal} },

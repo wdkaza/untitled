@@ -1,6 +1,5 @@
 #include "pixman.h"
 #include "render/gles2.h"
-#include "wlr-layer-shell-unstable-v1-protocol.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -224,6 +223,9 @@ static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfullscreen(struct Client *client, int fullscreen);
 static void changeoutputlayout(struct wl_listener *listener, void *data);
+static void outputmanagerapply(struct wl_listener *listener, void *data);
+static void outputmanagertest(struct wl_listener *listener, void *data);
+static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
 static void killclient(const Arg *arg);
@@ -259,6 +261,8 @@ static struct wl_listener cursor_axis = {.notify = cursoraxis};
 static struct wl_listener cursor_button = {.notify = cursorbutton};
 static struct wl_listener cursor_frame = {.notify = cursorframe};
 static struct wl_listener request_set_selection = {.notify = seatsetselection};
+static struct wl_listener output_manager_apply = {.notify = outputmanagerapply};
+static struct wl_listener output_manager_test = {.notify = outputmanagertest};
 static struct wl_listener request_set_primary_selection = {.notify = seatsetprimaryselection};
 static struct wl_listener request_cursor = {.notify = seatrequestcursor};
 static struct wl_listener output_layout_change = {.notify = changeoutputlayout};
@@ -273,7 +277,7 @@ static struct Server *server;
 static struct wlr_compositor *compositor;
 static struct wlr_scene *scene;
 static struct wlr_output_layout *output_layout;
-static struct wlr_xdg_output_manager_v1 *xdg_output_manager;
+static struct wlr_output_manager_v1 *output_manager;
 static struct wlr_viewporter *viewporter;
 static struct wlr_fractional_scale_manager_v1 *fractional_scale;
 static struct wlr_xdg_activation_v1 *activation;
@@ -428,6 +432,64 @@ void arrangelayer(struct Monitor *mon, struct wl_list *list, struct wlr_box *usa
     wlr_scene_layer_surface_v1_configure(layer->scene_layer_surface, &full_area, usable_area);
 		wlr_scene_node_set_position(&layer->popups->node, layer->scene_tree->node.x, layer->scene_tree->node.y);
   }
+}
+
+static void outputmanagerapply(struct wl_listener *listener, void *data){
+  struct wlr_output_configuration_v1 *config = data;
+  outputmanagerapplyortest(config, 0);
+}
+
+static void outputmanagertest(struct wl_listener *listener, void *data){
+  struct wlr_output_configuration_v1 *config = data;
+  outputmanagerapplyortest(config, 1);
+}
+
+static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test){
+  struct wlr_output_configuration_head_v1 *config_head;
+  int ok = 1;
+
+  wl_list_for_each(config_head, &config->heads, link){
+    struct wlr_output *wlr_output = config_head->state.output;
+    struct Monitor *mon = wlr_output->data;
+    struct wlr_output_state state;
+
+    wlr_output_state_init(&state);
+    wlr_output_state_set_enabled(&state, config_head->state.enabled);
+    if(!config_head->state.enabled)
+      goto apply_or_test;
+    
+    if(config_head->state.mode){
+      wlr_output_state_set_mode(&state, config_head->state.mode);
+    }
+    else{
+      wlr_output_state_set_custom_mode(&state,
+                          config_head->state.custom_mode.width,
+                          config_head->state.custom_mode.height,
+                          config_head->state.custom_mode.refresh);
+    }
+
+    wlr_output_state_set_transform(&state, config_head->state.transform);
+    wlr_output_state_set_scale(&state, config_head->state.scale);
+    wlr_output_state_set_adaptive_sync_enabled(&state, config_head->state.adaptive_sync_enabled);
+apply_or_test:
+    ok &= test ? wlr_output_test_state(wlr_output, &state)
+               : wlr_output_commit_state(wlr_output, &state);
+
+    if(!test && wlr_output->enabled && (mon->m.x != config_head->state.x || mon->m.y != config_head->state.y)){
+      wlr_output_layout_add(output_layout, wlr_output,
+                            config_head->state.x, config_head->state.y);
+
+      wlr_output_state_finish(&state);
+    }
+  }
+
+	if(ok){
+		wlr_output_configuration_v1_send_succeeded(config);
+  }
+	else{
+		wlr_output_configuration_v1_send_failed(config);
+  }
+	wlr_output_configuration_v1_destroy(config);
 }
 
 void arrangelayers(struct Monitor *mon){
@@ -703,6 +765,15 @@ void rendermon(struct wl_listener *listener, void *data){
       wlr_surface_send_frame_done(surface, &now);
     }
   }
+
+  struct LayerSurface *layer;
+  for(int i = 0; i < 4;i++){
+    wl_list_for_each(layer, &mon->layers[i], link){
+      if(layer->mapped){
+        wlr_surface_send_frame_done(layer->layer_surface->surface, &now);
+      }
+    }
+  }
 }
 void requeststatemon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, request_state);
@@ -738,6 +809,8 @@ void createmon(struct wl_listener *listener, void *data){
 
   mon = calloc(1, sizeof(*mon));
   mon->wlr_output = wlr_output;
+  mon->m.x = -1;
+  mon->m.y = -1;
 
   mw_renderer_init_output(server->mw_renderer, mon);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
@@ -757,14 +830,6 @@ void createmon(struct wl_listener *listener, void *data){
   wlr_output_commit_state(wlr_output, &state);
   wlr_output_state_finish(&state);
 
-  if(mode){
-      mon->m.width = mode->width;
-      mon->m.height = mode->height;
-  } else {
-      mon->m.width = wlr_output->width;
-      mon->m.height = wlr_output->height;
-  }
-  mon->w = mon->m;
   wlr_output->data = mon;
   mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
   mon->frame.notify = rendermon;
@@ -788,15 +853,15 @@ void createmon(struct wl_listener *listener, void *data){
   }
   current_monitor = mon;
 }
-
 void changeoutputlayout(struct wl_listener *listener, void *data){
   struct Monitor *mon;
-  struct wlr_output_layout_output *output = NULL;
+  struct wlr_output_layout_output *layout_output;
   wl_list_for_each(mon, &mons, link){
-    output = wlr_output_layout_get(output_layout, mon->wlr_output);
-    mon->m.x = output->x;
-    mon->m.y = output->y;
-    wlr_scene_output_set_position(mon->scene_output, output->x, output->y);
+    layout_output = wlr_output_layout_get(output_layout, mon->wlr_output);
+    if(!layout_output) continue;
+    mon->m.x = layout_output->x;
+    mon->m.y = layout_output->y;
+    wlr_scene_output_set_position(mon->scene_output, layout_output->x, layout_output->y);
   }
 }
 
@@ -951,7 +1016,7 @@ void processcursormotion(uint32_t time){
   struct Monitor *mon;
   wl_list_for_each(mon, &mons, link){
     loutput = wlr_output_layout_get(output_layout, mon->wlr_output);
-    if(!loutput) return; 
+    if(!loutput) continue; 
     if(cursor->x >= loutput->x && cursor->x <= loutput->x + loutput->output->width && cursor->y >= loutput->y && cursor->y <= loutput->y + loutput->output->height){
       current_monitor = mon;
       break;
@@ -1411,13 +1476,14 @@ void init(){
 
   output_layout = wlr_output_layout_create(server->display);
   wl_signal_add(&output_layout->events.change, &output_layout_change);
-  xdg_output_manager = wlr_xdg_output_manager_v1_create(server->display, output_layout);
+  wlr_xdg_output_manager_v1_create(server->display, output_layout);
   viewporter = wlr_viewporter_create(server->display);
 	fractional_scale = wlr_fractional_scale_manager_v1_create(server->display, 1);
   //activation = wlr_xdg_activation_v1_create(display);
 
-  //wl_signal_add(&xdg_output_mgr->events.apply, &output_manager_apply);
-	//wl_signal_add(&xdg_output_mgr->events.test, &output_manager_test);
+  output_manager = wlr_output_manager_v1_create(server->display);
+  wl_signal_add(&output_manager->events.apply, &output_manager_apply);
+	wl_signal_add(&output_manager->events.test, &output_manager_test);
 
 
   wl_list_init(&keyboards);

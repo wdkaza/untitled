@@ -7,13 +7,14 @@ And well since its not even an alpha yet, wont write much here, but my TODO list
 # TODO
 - [x] simple shaders support :o
 - [x] basic window managment
+- [ ] popups
 - [ ] moving/resizing windows
 - [x] fullscreen feature
 - [ ] amazing(hopefully) monitor layout support
 - [x] basic config in a .h file for now
 - [x] layers support
 - [x] bars(waybar, etc) support(only half done)
-- [ ] window layouts(master layout, etc)
+- [ ] window layouts(master layout, etc)(out of scope for pre-alpha)
 - [x] xwayland support(highest priority(DONE!!))
 - [ ] making it stable and usable, trying to daily drive
 
@@ -21,4 +22,5 @@ these are the goals for it making this window manager to an alpha stage, after d
 i would love to try making animations, ~~adding scenefx support~~ custom renderer! and more
 
 # bugs
-- [] bugs(stopped keeping track of this, there is a lot currently)
+- [ ] bugs(stopped keeping track of this, there is a lot currently)
+- [ ] actually monitor scale doesnt work, annoying bug, i want to fix it

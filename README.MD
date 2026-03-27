@@ -14,7 +14,6 @@ And well since its not even an alpha yet, wont write much here, but my TODO list
 - [x] basic config in a .h file for now
 - [x] layers support
 - [x] bars(waybar, etc) support(only half done)
-- [ ] window layouts(master layout, etc)(out of scope for pre-alpha)
 - [x] xwayland support(highest priority(DONE!!))
 - [ ] making it stable and usable, trying to daily drive
 
@@ -23,4 +22,5 @@ i would love to try making animations, ~~adding scenefx support~~ custom rendere
 
 # bugs
 - [ ] bugs(stopped keeping track of this, there is a lot currently)
-- [ ] actually monitor scale doesnt work, annoying bug, i want to fix it
+- [ ] actually monitor scale doesnt work, annoying bug, i want to fix it and monrules overall are so hard to setup up(monrules dont work)
+- [ ] drag icon is offset and doesnt go semi transparent as on other window managers when its outside weston-dnd window

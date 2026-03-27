@@ -225,6 +225,7 @@ static void setfullscreen(struct Client *client, int fullscreen);
 static void changeoutputlayout(struct wl_listener *listener, void *data);
 static void outputmanagerapply(struct wl_listener *listener, void *data);
 static void outputmanagertest(struct wl_listener *listener, void *data);
+static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
 static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
@@ -706,6 +707,10 @@ static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, str
   }
 }
 
+static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data){
+  struct timespec *now = data;
+  wlr_surface_send_frame_done(surface, now);
+}
 
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
@@ -750,6 +755,14 @@ void rendermon(struct wl_listener *listener, void *data){
   renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
   renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]);
 
+  
+  if(seat->drag && seat->drag->icon && seat->drag->icon->surface->mapped){
+    struct wlr_drag_icon *icon = seat->drag->icon;
+    int sx = (int)cursor->x; // BUG : somewhere here with drag icon
+    int sy = (int)cursor->y;
+    rendersurface(server->mw_renderer, mon, icon->surface, sx, sy);
+  }
+
   pixman_region32_t damage;
   pixman_region32_init(&damage);
   pixman_region32_union_rect(&damage, &damage, 0,0 , mon->wlr_output->width, mon->wlr_output->height);
@@ -762,7 +775,7 @@ void rendermon(struct wl_listener *listener, void *data){
   wl_list_for_each(client2, &clients, link){
     struct wlr_surface *surface = client2->type == X11 ? client2->surface.xwayland->surface : client2->surface.xdg->surface;
     if(surface && surface->mapped){
-      wlr_surface_send_frame_done(surface, &now);
+      wlr_surface_for_each_surface(surface, sendframedone, &now);
     }
   }
 
@@ -770,11 +783,12 @@ void rendermon(struct wl_listener *listener, void *data){
   for(int i = 0; i < 4;i++){
     wl_list_for_each(layer, &mon->layers[i], link){
       if(layer->mapped){
-        wlr_surface_send_frame_done(layer->layer_surface->surface, &now);
+        wlr_surface_for_each_surface(layer->layer_surface->surface, sendframedone, &now);
       }
     }
   }
 }
+
 void requeststatemon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, request_state);
   struct wlr_output_event_request_state *event = data;
@@ -853,16 +867,25 @@ void createmon(struct wl_listener *listener, void *data){
   }
   current_monitor = mon;
 }
+
 void changeoutputlayout(struct wl_listener *listener, void *data){
   struct Monitor *mon;
   struct wlr_output_layout_output *layout_output;
+  struct wlr_output_configuration_v1 *config = wlr_output_configuration_v1_create();
+  struct wlr_output_configuration_head_v1 *config_head;
   wl_list_for_each(mon, &mons, link){
     layout_output = wlr_output_layout_get(output_layout, mon->wlr_output);
     if(!layout_output) continue;
     mon->m.x = layout_output->x;
     mon->m.y = layout_output->y;
     wlr_scene_output_set_position(mon->scene_output, layout_output->x, layout_output->y);
+
+    config_head = wlr_output_configuration_head_v1_create(config, mon->wlr_output);
+    config_head->state.x = mon->m.x;
+    config_head->state.y = mon->m.y;
   }
+
+  wlr_output_manager_v1_set_configuration(output_manager, config);
 }
 
 // from dwl
@@ -1002,8 +1025,34 @@ void cursorresize(){
   updateborders(client, new_width, new_height);
 }
 
+static struct Client *clientat(double x, double y){// not the best solution but i give up thinking of something easy
+  struct Client *client;
+  wl_list_for_each(client, &clients, link){
+    struct wlr_surface *surface = client_surface(client);
+    if(!surface || !surface->mapped) continue;
+    if(client->desktop_index != current_desktop) continue;
+    int cx = client->scene_tree->node.x;
+    int cy = client->scene_tree->node.y;
+    int cw;
+    int ch;
+    if(client_is_x11(client)){
+      cw = client->surface.xwayland->width;
+      ch = client->surface.xwayland->height;
+    }
+    else{
+      cw = client->surface.xdg->current.geometry.width;
+      ch = client->surface.xdg->current.geometry.height;
+    }
+    
+    if(x >= cx && x < cx + cw && y >= cy && y < cy + ch){
+      return client;
+    } 
+  }
+  return NULL;
+}
+
 void processcursormotion(uint32_t time){
-	wlr_scene_node_set_position(&drag_icon->node, (int)round(cursor->x), (int)round(cursor->y)); // TODO : may be broken
+	wlr_scene_node_set_position(&drag_icon->node, (int)round(cursor->x), (int)round(cursor->y));
   if(cursor_mode == CursorMove){
     cursormove();
     return;
@@ -1023,40 +1072,48 @@ void processcursormotion(uint32_t time){
     }
   }
 
-  double sx, sy;
-  struct wlr_surface *surface = NULL;
-  struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
-  if(!node || node->type != WLR_SCENE_NODE_BUFFER){
+  struct Client *client = clientat(cursor->x, cursor->y);
+  if(!client){
     wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
-    return; 
-  } 
-  struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
-  struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
-
-  if(scene_surface){
-    surface = scene_surface->surface;
-    struct wlr_scene_tree *tree = node->parent;
-
-    while(tree != NULL && tree->node.data == NULL){
-      tree = tree->node.parent;
+    if(seat->pointer_state.focused_surface){
+      wlr_seat_pointer_clear_focus(seat);
     }
-
-    if(tree && tree->node.data){
-      void *data = tree->node.data;
-      struct LayerSurface *layer = data;
-      if(layer->type != LayerShell){
-        struct Client *client = data;
-        setfocus(client);
-      }
-    }
-
-    wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
-    wlr_seat_pointer_notify_motion(seat, time, sx, sy);
+    return;
   }
-  else{
-    wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
-    wlr_seat_pointer_clear_focus(seat);
+
+  struct wlr_surface *surface = client_surface(client);
+  surface = client_surface(client);
+  int cx = client->scene_tree->node.x;
+  int cy = client->scene_tree->node.y;
+
+  if(client->type == XDGShell){
+    cx -= client->surface.xdg->current.geometry.x;
+    cy -= client->surface.xdg->current.geometry.y;
   }
+
+  double lx = cursor->x - cx;
+  double ly = cursor->y - cy;
+
+  struct wlr_surface *subsurface = NULL;
+  double sub_sx;
+  double sub_sy;
+  if(client->type == XDGShell){
+    subsurface = wlr_xdg_surface_surface_at(client->surface.xdg, lx, ly, &sub_sx, &sub_sy);
+  }
+#ifdef XWAYLAND
+  else if(client->type == X11){
+    subsurface = wlr_surface_surface_at(client->surface.xwayland->surface, lx, ly, &sub_sx, &sub_sy);
+  }
+#endif
+  if(!subsurface){
+    subsurface = surface;
+    sub_sx = lx;
+    sub_sy = ly;
+  }
+
+  //setfocus(client);
+  wlr_seat_pointer_notify_enter(seat, subsurface, sub_sx, sub_sy);
+  wlr_seat_pointer_notify_motion(seat, time, sub_sx, sub_sy);
 };
 
 void cursormotion(struct wl_listener *listener, void *data){
@@ -1085,49 +1142,16 @@ void cursorbutton(struct wl_listener *listener, void *data){
   struct wlr_pointer_button_event *event = data;
   wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
 
-  double sx, sy;
-  struct wlr_surface *surface = NULL;
-  struct wlr_scene_node *node = wlr_scene_node_at(&scene->tree.node, cursor->x, cursor->y, &sx, &sy);
-  if(!node || node->type != WLR_SCENE_NODE_BUFFER){
-    return; 
-  }
-
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:
-    /* TODO : expand this into a button.config like in dwl
-     * Plus remake this entire garbage
-    */
     if(event->button == BTN_LEFT){
-      struct wlr_scene_buffer *scene_buffer = wlr_scene_buffer_from_node(node);
-      struct wlr_scene_surface *scene_surface = wlr_scene_surface_try_from_buffer(scene_buffer);
-      if(!scene_surface){
-        cursor_mode = CursorPassthrough;
-        gclient = NULL;
-        return;
+      struct Client *client = clientat(cursor->x, cursor->y);
+      if(!client){
+          cursor_mode = CursorPassthrough;
+          gclient = NULL;
+          return;
       }
 
-      surface = scene_surface->surface;
-      struct wlr_scene_tree *tree = node->parent;
-      while(tree != NULL && tree->node.data == NULL){
-        tree = tree->node.parent;
-      }
-
-      if(tree == NULL || tree->node.data == NULL){
-        cursor_mode = CursorPassthrough;
-        gclient = NULL;
-        return;
-      }
-     
-      struct LayerSurface *layer = tree->node.data;
-      if(layer->type == LayerShell){
-        wlr_seat_pointer_notify_enter(seat, surface, sx, sy);
-        cursor_mode = CursorPassthrough;
-        gclient = NULL;
-        return;
-      }
-
-
-      struct Client *client = tree->node.data;
       cursor_mode = CursorMove;
       setfocus(client);
       gclient = client;
@@ -1136,8 +1160,8 @@ void cursorbutton(struct wl_listener *listener, void *data){
       client->isfloating = true;
     }
     if(event->button == BTN_RIGHT){
-        // TOOD : special resizing in layout/normal when floating 
-        return;
+      // TOOD : special resizing in layout/normal when floating 
+      return;
       }
     return;
   case WL_POINTER_BUTTON_STATE_RELEASED:
@@ -1284,6 +1308,7 @@ void newclient(struct wl_listener *listener, void *data){
   client->surface.xdg = toplevel->base;
   client->type = XDGShell;
   client->mon = current_monitor;
+  client->desktop_index = current_desktop;
   focused_client = client; // TODO : temp fix, maybe move somewhere else, same with x11
   client->bw = 2;
   for(int i = 0; i < 4; i++){
@@ -1385,6 +1410,7 @@ void newclientx11(struct wl_listener *listener, void *data){
   client->surface.xwayland = xsurface;
   client->mon = current_monitor;
   client->type = X11;
+  client->desktop_index = current_desktop;
   focused_client = client; // TODO : temp fix
   if(xsurface->override_redirect){
     client->isfloating = 1;
@@ -1473,6 +1499,8 @@ void init(){
   // TODO : protocols setup here
   wlr_subcompositor_create(server->display);
   wlr_data_device_manager_create(server->display);
+  wlr_primary_selection_v1_device_manager_create(server->display);
+  wlr_data_control_manager_v1_create(server->display);
 
   output_layout = wlr_output_layout_create(server->display);
   wl_signal_add(&output_layout->events.change, &output_layout_change);

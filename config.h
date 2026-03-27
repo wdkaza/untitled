@@ -13,8 +13,8 @@ static const float fullscreen_bg[] = {0.2f, 0.2f, 0.2f, 1.0f};
 
 static const MonitorRule monrules[] = {
 // name, scale, x, y, rotation
-  {"eDP-1", 1,  0,  0,     WL_OUTPUT_TRANSFORM_NORMAL},
-  {"HDMI-A-1", 1, 0, 1080, WL_OUTPUT_TRANSFORM_NORMAL},
+  {"NULL", 1,  -1,  -1,     WL_OUTPUT_TRANSFORM_NORMAL},
+  //{"HDMI-A-1", 1, -1, -1, WL_OUTPUT_TRANSFORM_NORMAL},
 };
 
 static const Key keys[] = {

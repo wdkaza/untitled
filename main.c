@@ -225,6 +225,8 @@ static void setfullscreen(struct Client *client, int fullscreen);
 static void changeoutputlayout(struct wl_listener *listener, void *data);
 static void outputmanagerapply(struct wl_listener *listener, void *data);
 static void outputmanagertest(struct wl_listener *listener, void *data);
+static void newpopup(struct wl_listener *listener, void *data);
+static void commitpopup(struct wl_listener *listener, void *data);
 static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
 static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void setfocus(struct Client *client);
@@ -233,6 +235,7 @@ static void killclient(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
 static void cyclefocus(const Arg *arg);
 static void changedesktop(const Arg *arg);
+static void exitwm(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -270,6 +273,7 @@ static struct wl_listener output_layout_change = {.notify = changeoutputlayout};
 static struct wl_listener new_decoration = {.notify = newdecoration};
 static struct wl_listener new_input = {.notify = createinput};
 static struct wl_listener new_client = {.notify = newclient};
+static struct wl_listener new_popup = {.notify = newpopup};
 static struct wl_listener start_drag = {.notify = startdrag};
 static struct wl_listener request_start_drag = {.notify = requeststartdrag};
 
@@ -334,9 +338,12 @@ void changedesktop(const Arg *arg){
   //arrange();
 }
 
-void
-spawn(const Arg *arg)
-{
+void exitwm(const Arg *arg){
+  (void)arg;
+  quit();
+}
+
+void spawn(const Arg *arg){
 	if (fork() == 0) {
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
@@ -1198,6 +1205,9 @@ void mapnotify(struct wl_listener *listener, void *data){
 
 void unmapnotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, unmap);
+  if(client == focused_client){
+    focused_client = NULL;
+  }
   wl_list_remove(&client->link);
   if(!wl_list_empty(&clients)){
     struct Client *next = wl_container_of(clients.next, next, link);
@@ -1217,7 +1227,8 @@ void commitnotify(struct wl_listener *listener, void *data){
 
 void destroynotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, destroy);
-  if(seat->keyboard_state.focused_surface == client->surface.xdg->surface){
+  struct wlr_surface *surface = client_surface(client);
+  if(seat->keyboard_state.focused_surface == surface){
     wlr_seat_keyboard_clear_focus(seat);
   }
 
@@ -1226,6 +1237,7 @@ void destroynotify(struct wl_listener *listener, void *data){
       wlr_scene_node_destroy(&client->border[i]->node);
     }
   }
+
   wl_list_remove(&client->map.link);
   wl_list_remove(&client->unmap.link);
   wl_list_remove(&client->commit.link);
@@ -1298,6 +1310,37 @@ void setfullscreen(struct Client *client, int fullscreen){
     client->bw = 0; // TODO : same as above
     resize(client, client->prev);
   }
+}
+
+void newpopup(struct wl_listener *listener, void *data){
+  struct wlr_xdg_popup *popup = data;
+  LISTEN_STATIC(&popup->base->surface->events.commit, commitpopup);
+}
+
+void commitpopup(struct wl_listener *listener, void *data){
+  struct wlr_surface *surface = data;
+  struct wlr_xdg_popup *popup = wlr_xdg_popup_try_from_wlr_surface(surface);
+  struct Client *client = NULL;
+  struct LayerSurface *layer = NULL;
+  int type = -1;
+
+  if(!popup->base->initial_commit) return;
+
+  type = toplevel_from_wlr_surface(popup->base->surface, &client, &layer);
+  if(!popup->parent || type < 0) return;
+  popup->base->surface->data = wlr_scene_xdg_surface_create(popup->parent->data, popup->base);
+
+  if((layer && !layer->mon) || (client && !client->mon)){
+    wlr_xdg_popup_destroy(popup);
+    return;
+  }
+  struct wlr_box box;
+  box = type == LayerShell ? layer->mon->m : client->mon->w;
+	box.x -= (type == LayerShell ? layer->scene_tree->node.x : client->geom.x);
+	box.y -= (type == LayerShell ? layer->scene_tree->node.y : client->geom.y);
+	wlr_xdg_popup_unconstrain_from_box(popup, &box);
+	wl_list_remove(&listener->link);
+	free(listener);
 }
 
 void newclient(struct wl_listener *listener, void *data){
@@ -1527,7 +1570,7 @@ void init(){
   
   xdg_shell = wlr_xdg_shell_create(server->display, 6);
   wl_signal_add(&xdg_shell->events.new_toplevel, &new_client);
-  //wl_signal_add(&xdg_shell->events.new_popup, &new_popup);
+  wl_signal_add(&xdg_shell->events.new_popup, &new_popup);
   wl_list_init(&clients);
 
   cursor = wlr_cursor_create();
@@ -1595,14 +1638,49 @@ void quit(){
 	xwayland = NULL;
 #endif
   wl_display_destroy_clients(server->display); 
+
+  wlr_cursor_destroy(cursor);
 	wlr_xcursor_manager_destroy(cursor_manager);
-  wlr_backend_destroy(server->wlr_backend);
-  wl_display_destroy(server->display); 
+
   wlr_scene_node_destroy(&scene->tree.node);
+  
+  mw_renderer_destroy(server->mw_renderer);
+  free(server->mw_renderer);
+
+  wlr_allocator_destroy(server->wlr_allocator);
+  wlr_renderer_destroy(server->wlr_renderer);
+  wlr_backend_destroy(server->wlr_backend);
+
+  wlr_scene_node_destroy(&scene->tree.node);
+  wl_display_destroy(server->display);
+  free(server);
+  server = NULL;
 }
 
 void destroylisteners(){
-	wl_list_remove(&server->new_output.link);
+  wl_list_remove(&server->new_output.link);
+  wl_list_remove(&output_layout_change.link);
+  wl_list_remove(&output_manager_apply.link);
+  wl_list_remove(&output_manager_test.link);
+  wl_list_remove(&new_input.link);
+  wl_list_remove(&request_cursor.link);
+  wl_list_remove(&request_set_selection.link);
+  wl_list_remove(&request_set_primary_selection.link);
+  wl_list_remove(&request_start_drag.link);
+  wl_list_remove(&start_drag.link);
+  wl_list_remove(&cursor_motion.link);
+  wl_list_remove(&cursor_motion_absolute.link);
+  wl_list_remove(&cursor_button.link);
+  wl_list_remove(&cursor_axis.link);
+  wl_list_remove(&cursor_frame.link);
+  wl_list_remove(&new_client.link);
+  wl_list_remove(&new_popup.link);
+  wl_list_remove(&new_layer_surface.link);
+  wl_list_remove(&new_decoration.link);
+#ifdef XWAYLAND
+  wl_list_remove(&xwayland_ready.link);
+  wl_list_remove(&new_xwayland_surface.link);
+#endif
 }
 
 int main(){

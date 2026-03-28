@@ -42,6 +42,66 @@ static inline void client_get_geometry(struct Client *client, struct wlr_box *ge
 	*geom = client->surface.xdg->geometry;
 }
 
+static inline int toplevel_from_wlr_surface(struct wlr_surface *s, struct Client **pc, struct LayerSurface **pl){
+	struct wlr_xdg_surface *xdg_surface, *tmp_xdg_surface;
+	struct wlr_surface *root_surface;
+	struct wlr_layer_surface_v1 *layer_surface;
+	struct Client *c = NULL;
+	struct LayerSurface *l = NULL;
+	int type = -1;
+#ifdef XWAYLAND
+	struct wlr_xwayland_surface *xsurface;
+#endif
+
+	if (!s)
+		return -1;
+	root_surface = wlr_surface_get_root_surface(s);
+
+#ifdef XWAYLAND
+	if ((xsurface = wlr_xwayland_surface_try_from_wlr_surface(root_surface))) {
+		c = xsurface->data;
+		type = c->type;
+		goto end;
+	}
+#endif
+
+	if ((layer_surface = wlr_layer_surface_v1_try_from_wlr_surface(root_surface))) {
+		l = layer_surface->data;
+		type = LayerShell;
+		goto end;
+	}
+
+	xdg_surface = wlr_xdg_surface_try_from_wlr_surface(root_surface);
+	while (xdg_surface) {
+		tmp_xdg_surface = NULL;
+		switch (xdg_surface->role) {
+		case WLR_XDG_SURFACE_ROLE_POPUP:
+			if (!xdg_surface->popup || !xdg_surface->popup->parent)
+				return -1;
+
+			tmp_xdg_surface = wlr_xdg_surface_try_from_wlr_surface(xdg_surface->popup->parent);
+
+			if (!tmp_xdg_surface)
+				return toplevel_from_wlr_surface(xdg_surface->popup->parent, pc, pl);
+
+			xdg_surface = tmp_xdg_surface;
+			break;
+		case WLR_XDG_SURFACE_ROLE_TOPLEVEL:
+			c = xdg_surface->data;
+			type = c->type;
+			goto end;
+		case WLR_XDG_SURFACE_ROLE_NONE:
+			return -1;
+		}
+	}
+
+end:
+	if (pl)
+		*pl = l;
+	if (pc)
+		*pc = c;
+	return type;
+}
 static inline void client_get_clip(struct Client *client, struct wlr_box *clip){
 	*clip = (struct wlr_box){
 		.x = 0,

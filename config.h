@@ -20,6 +20,7 @@ static const MonitorRule monrules[] = {
 static const Key keys[] = {
   {MODKEY,                    XKB_KEY_n,           spawn,            {.v = terminal} },
   {MODKEY,                    XKB_KEY_p,           spawn,            {.v = menu}},
+  {MODKEY,                    XKB_KEY_o,           exitwm,           {}},
   {MODKEY,                    XKB_KEY_w,           cyclefocus,       {}},
   {MODKEY,                    XKB_KEY_r,           togglefullscreen, {}},
   {MODKEY,                    XKB_KEY_q,           killclient,       {}},

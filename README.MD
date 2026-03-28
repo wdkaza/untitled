@@ -1,4 +1,4 @@
-# untitled (pre-aplha 0.1.6)
+# untitled (pre-aplha 0.1.7)
 A minimal wayland window manager inspired by dwl  
 Why "untitled"? The state of it is so early im still not sure of what to call it and i dont know what i want it to be, its just your another window manager at the moment  
 sort of a fork of dwl but im just using dwl as a kickstart for most pieces of code
@@ -21,6 +21,8 @@ these are the goals for it making this window manager to an alpha stage, after d
 i would love to try making animations, ~~adding scenefx support~~ custom renderer! and more
 
 # bugs
-- [ ] bugs(stopped keeping track of this, there is a lot currently)
+- [ ] bugs**(stopped keeping track of this, there is a lot currently**
 - [ ] actually monitor scale doesnt work, annoying bug, i want to fix it and monrules overall are so hard to setup up(monrules dont work)
 - [ ] drag icon is offset and doesnt go semi transparent as on other window managers when its outside weston-dnd window
+- [ ] popups have incorrect possition, always spawn at 0,0, with some exeptions
+- [ ] clicking on a firefox tooltip thing crashes the wm

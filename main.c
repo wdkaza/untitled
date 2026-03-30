@@ -846,6 +846,9 @@ void createmon(struct wl_listener *listener, void *data){
       break;
     }
   }
+
+  mon->w = mon->m;
+
   wlr_output_state_set_enabled(&state, true);
   wlr_output_state_set_mode(&state, mode);
   wlr_output_commit_state(wlr_output, &state);
@@ -1020,16 +1023,16 @@ void cursorresize(){
   struct Client *client = gclient;
   int new_width = cursor->x - client->scene_tree->node.x;
   int new_height = cursor->y - client->scene_tree->node.y;
-  if(new_width >= 50 && new_height >= 50){
-    wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, new_width, new_height);
-    updateborders(client, new_width, new_height);
-  }
+  if(new_width < 50 || new_height < 50) return;
 #ifdef XWAYLAND
-  else if(client->type == X11){
+  if(client->type == X11){
+    if(client->surface.xwayland){
     wlr_xwayland_surface_configure(client->surface.xwayland, client->scene_tree->node.x, client->scene_tree->node.y, new_width, new_height);
+      return;
+    }
   }
 #endif
-  updateborders(client, new_width, new_height);
+  wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, new_width, new_height);
 }
 
 static struct Client *clientat(double x, double y){// not the best solution but i give up thinking of something easy
@@ -1151,7 +1154,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
 
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:
-    if(event->button == BTN_LEFT){
+    if(event->button == BTN_LEFT && (wlr_keyboard_get_modifiers(wlr_seat_get_keyboard(seat)) & WLR_MODIFIER_ALT)){
       struct Client *client = clientat(cursor->x, cursor->y);
       if(!client){
           cursor_mode = CursorPassthrough;
@@ -1166,10 +1169,21 @@ void cursorbutton(struct wl_listener *listener, void *data){
       grab_y = cursor->y - client->scene_tree->node.y;
       client->isfloating = true;
     }
-    if(event->button == BTN_RIGHT){
-      // TOOD : special resizing in layout/normal when floating 
-      return;
+    if(event->button == BTN_RIGHT && (wlr_keyboard_get_modifiers(wlr_seat_get_keyboard(seat)) & WLR_MODIFIER_ALT)){
+      struct Client *client = clientat(cursor->x, cursor->y);
+      if(!client){
+        cursor_mode = CursorPassthrough;
+        gclient = NULL;
+        return;
       }
+
+      cursor_mode = CursorResize;
+      setfocus(client);
+      gclient = client;
+      grab_x = cursor->x - client->scene_tree->node.x;
+      grab_y = cursor->y - client->scene_tree->node.y;
+      client->isfloating = true;
+    }
     return;
   case WL_POINTER_BUTTON_STATE_RELEASED:
     // BUG : monitors focus could be broken here
@@ -1192,8 +1206,15 @@ void mapnotify(struct wl_listener *listener, void *data){
     wlr_scene_xdg_surface_create(client->scene_tree, client->surface.xdg)
     : wlr_scene_subsurface_tree_create(client->scene_tree, client->surface.xwayland->surface);
   client->scene_tree->node.data = client->scene_surface->node.data = client;
+  client_surface(client)->data = client->scene_surface;
 
   client_get_geometry(client, &client->geom);
+
+  if(client->type == X11){
+    wlr_scene_node_set_position(&client->scene_tree->node, client->surface.xwayland->x, client->surface.xwayland->y);
+                                 client->geom.x = client->surface.xwayland->x;
+                                 client->geom.y = client->surface.xwayland->y;
+  }
 
   for(int i = 0; i < 4; i++){
     client->border[i] = wlr_scene_rect_create(client->scene_tree, 0, 0, focused_border_color);
@@ -1648,7 +1669,6 @@ void quit(){
   free(server->mw_renderer);
 
   wlr_allocator_destroy(server->wlr_allocator);
-  wlr_renderer_destroy(server->wlr_renderer);
   wlr_backend_destroy(server->wlr_backend);
 
   wlr_scene_node_destroy(&scene->tree.node);

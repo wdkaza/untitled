@@ -41,6 +41,22 @@ static inline void client_get_geometry(struct Client *client, struct wlr_box *ge
 #endif
 	*geom = client->surface.xdg->geometry;
 }
+/*
+static inline uint32_t client_set_bounds(struct Client *client, int32_t width, int32_t height){
+#ifdef XWAYLAND
+	if (client_is_x11(client))
+		return 0;
+#endif
+	if (wl_resource_get_version(client->surface.xdg->toplevel->resource) >=
+			XDG_TOPLEVEL_CONFIGURE_BOUNDS_SINCE_VERSION && width >= 0 && height >= 0
+			&& (client->bounds.width != width || client->bounds.height != height)) {
+		client->bounds.width = width;
+		client->bounds.height = height;
+		return wlr_xdg_toplevel_set_bounds(client->surface.xdg->toplevel, width, height);
+	}
+	return 0;
+}
+*/
 
 static inline int toplevel_from_wlr_surface(struct wlr_surface *s, struct Client **pc, struct LayerSurface **pl){
 	struct wlr_xdg_surface *xdg_surface, *tmp_xdg_surface;

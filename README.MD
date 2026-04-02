@@ -24,4 +24,4 @@ i would love to try making animations, ~~adding scenefx support~~ custom rendere
 - [ ] bugs**(stopped keeping track of this, there is a lot currently**
 - [ ] actually monitor scale doesnt work, annoying bug, i want to fix it and monrules overall are so hard to setup up(monrules dont work)
 - [ ] drag icon is offset and doesnt go semi transparent as on other window managers when its outside weston-dnd window
-- [ ] upon resizing a window that has popups, popups disapear completly with no trace and no longer appear
+- [ ] upon resizing a window that has popups, popups disapear completly with no trace and no longer appear(very very annoying bug, cant fix for hours)

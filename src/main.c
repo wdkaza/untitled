@@ -83,7 +83,7 @@ enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize};
 enum { XDGShell, LayerShell, X11 };
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock, NUM_LAYERS };
 
-#include "src/monitor.h"
+#include "monitor.h"
 
 struct Monitor;
 struct mw_renderer;
@@ -314,10 +314,10 @@ static struct Client *focused_client; // dont know if i should keep it,
 // not a common practice in other wm's from what i saw
 
 
-#include "src/server.h"
-#include "src/renderer.h"
+#include "server.h"
+#include "renderer.h"
 #include "config.h"
-#include "src/client.h"
+#include "client.h"
 void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
   struct Client *next_client = wl_container_of(clients.prev, next_client, link);

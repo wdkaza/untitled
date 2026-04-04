@@ -21,7 +21,9 @@ these are the goals for it making this window manager to an alpha stage, after d
 i would love to try making animations, ~~adding scenefx support~~ custom renderer! and more
 
 # bugs
-- [ ] bugs**(stopped keeping track of this, there is a lot currently**
+- [ ] bugs
 - [ ] actually monitor scale doesnt work, annoying bug, i want to fix it and monrules overall are so hard to setup up(monrules dont work)
 - [ ] drag icon is offset and doesnt go semi transparent as on other window managers when its outside weston-dnd window
-- [ ] upon resizing a window that has popups, popups disapear completly with no trace and no longer appear(very very annoying bug, cant fix for hours)
+- [ ] popups after a resize still have a weird position, but now render atleast, something is wrong with cursor cordinates
+- [ ] steam popups dont update their position when the steam window itself moves to a diffrent one
+- [ ] you can resize/move xdg popups, funny, simple fix in cursorbutton to skip them

@@ -218,6 +218,7 @@ static void destroydragicon(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
+static void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy);
 static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
@@ -513,11 +514,6 @@ void arrangelayers(struct Monitor *mon){
     arrangelayer(mon, &mon->layers[i], &usable_area, 1);
   }
 
-  if(!wlr_box_equal(&usable_area, &mon->w)){
-    mon->w = usable_area;
-    // TODO
-  }
-
   for(int i = 3; i >= 0; i--){
     arrangelayer(mon, &mon->layers[i], &usable_area, 0);
   }
@@ -719,6 +715,20 @@ static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *dat
   wlr_surface_send_frame_done(surface, now);
 }
 
+static void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy){
+  struct wlr_xdg_popup *popup;
+  wl_list_for_each(popup, &xdg->popups, link){
+    if(!popup->base->surface->mapped) continue;
+
+    struct wlr_box geo = popup->current.geometry;
+    int popup_sx = sx + geo.x;
+    int popup_sy = sy + geo.y;
+    rendersurface(renderer, mon, popup->base->surface, popup_sx, popup_sy);
+
+    renderpopups(renderer, mon, popup->base, popup_sx, popup_sy);
+  }
+}
+
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
 
@@ -757,6 +767,9 @@ void rendermon(struct wl_listener *listener, void *data){
       sy -= client->surface.xdg->current.geometry.y;
     }
     rendersurface(server->mw_renderer, mon, surface, sx, sy);
+    if(client->type == XDGShell){
+      renderpopups(server->mw_renderer, mon, client->surface.xdg, sx, sy);
+    }
   }
 
   renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
@@ -888,6 +901,9 @@ void changeoutputlayout(struct wl_listener *listener, void *data){
     if(!layout_output) continue;
     mon->m.x = layout_output->x;
     mon->m.y = layout_output->y;
+    mon->m.width = mon->wlr_output->width;
+    mon->m.height = mon->wlr_output->height;
+    mon->w = mon->m;
     wlr_scene_output_set_position(mon->scene_output, layout_output->x, layout_output->y);
 
     config_head = wlr_output_configuration_head_v1_create(config, mon->wlr_output);
@@ -1150,8 +1166,6 @@ void cursorframe(struct wl_listener *listener, void *data){
 
 void cursorbutton(struct wl_listener *listener, void *data){
   struct wlr_pointer_button_event *event = data;
-  wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
-
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:
     if(event->button == BTN_LEFT && (wlr_keyboard_get_modifiers(wlr_seat_get_keyboard(seat)) & WLR_MODIFIER_ALT)){
@@ -1168,6 +1182,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
       grab_x = cursor->x - client->scene_tree->node.x;
       grab_y = cursor->y - client->scene_tree->node.y;
       client->isfloating = true;
+      return;
     }
     if(event->button == BTN_RIGHT && (wlr_keyboard_get_modifiers(wlr_seat_get_keyboard(seat)) & WLR_MODIFIER_ALT)){
       struct Client *client = clientat(cursor->x, cursor->y);
@@ -1183,12 +1198,15 @@ void cursorbutton(struct wl_listener *listener, void *data){
       grab_x = cursor->x - client->scene_tree->node.x;
       grab_y = cursor->y - client->scene_tree->node.y;
       client->isfloating = true;
+      return;
     }
+    wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
     return;
   case WL_POINTER_BUTTON_STATE_RELEASED:
     // BUG : monitors focus could be broken here
     cursor_mode = CursorPassthrough;
     gclient = NULL;
+    wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
     return;
   }
 }
@@ -1243,6 +1261,13 @@ void commitnotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, commit);
   if(client->surface.xdg->initial_commit){
     wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, 0, 0);
+  } 
+  else{
+    struct wlr_box old_geom = client->geom;
+    struct wlr_box new_geom;
+    client_get_geometry(client, &new_geom);
+    client->geom.width = new_geom.width;
+    client->geom.height = new_geom.height;
   }
 }
 
@@ -1348,17 +1373,26 @@ void commitpopup(struct wl_listener *listener, void *data){
   if(!popup->base->initial_commit) return;
 
   type = toplevel_from_wlr_surface(popup->base->surface, &client, &layer);
-  if(!popup->parent || type < 0) return;
   popup->base->surface->data = wlr_scene_xdg_surface_create(popup->parent->data, popup->base);
 
   if((layer && !layer->mon) || (client && !client->mon)){
     wlr_xdg_popup_destroy(popup);
     return;
   }
+
   struct wlr_box box;
-  box = type == LayerShell ? layer->mon->m : client->mon->w;
-	box.x -= (type == LayerShell ? layer->scene_tree->node.x : client->geom.x);
-	box.y -= (type == LayerShell ? layer->scene_tree->node.y : client->geom.y);
+  if(type == LayerShell){
+    box = layer->mon->m;
+    box.x -= layer->scene_tree->node.x;
+    box.y -= layer->scene_tree->node.y;
+  } 
+  else{
+    struct Monitor *mon = client->mon;
+    box.x = mon->m.x - client->scene_tree->node.x - client->surface.xdg->current.geometry.x;
+    box.y = mon->m.y - client->scene_tree->node.y - client->surface.xdg->current.geometry.y;
+    box.width = mon->m.width;
+    box.height = mon->m.height;
+  }
 	wlr_xdg_popup_unconstrain_from_box(popup, &box);
 	wl_list_remove(&listener->link);
 	free(listener);

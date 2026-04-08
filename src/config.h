@@ -24,9 +24,9 @@ static const Key keys[] = {
   {MODKEY,                    XKB_KEY_w,           cyclefocus,       {}},
   {MODKEY,                    XKB_KEY_r,           togglefullscreen, {}},
   {MODKEY,                    XKB_KEY_q,           killclient,       {}},
-  {MODKEY,                    XKB_KEY_m,           changedesktop,    {.i = 1}},
-  {MODKEY,                    XKB_KEY_z,           changedesktop,    {.i = 2}},
-  {MODKEY,                    XKB_KEY_3,           changedesktop,    {.i = 3}},
+  //{MODKEY,                    XKB_KEY_m,           changedesktop,    {.i = 1}},
+  //{MODKEY,                    XKB_KEY_z,           changedesktop,    {.i = 2}},
+  //{MODKEY,                    XKB_KEY_3,           changedesktop,    {.i = 3}},
 };
 /*
 static const Button Buttons[] = {

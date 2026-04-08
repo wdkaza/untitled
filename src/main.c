@@ -721,8 +721,8 @@ static void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, stru
     if(!popup->base->surface->mapped) continue;
 
     struct wlr_box geo = popup->current.geometry;
-    int popup_sx = sx + geo.x;
-    int popup_sy = sy + geo.y;
+    int popup_sx = sx + xdg->current.geometry.x + popup->current.geometry.x - popup->base->current.geometry.x;
+    int popup_sy = sy + xdg->current.geometry.y + popup->current.geometry.y - popup->base->current.geometry.y;
     rendersurface(renderer, mon, popup->base->surface, popup_sx, popup_sy);
 
     renderpopups(renderer, mon, popup->base, popup_sx, popup_sy);
@@ -1028,6 +1028,12 @@ void cursormove(){
   }
   if(client->type == X11){
     updateborders(client, client->surface.xwayland->width, client->surface.xwayland->height);
+    // TODO : cursormove() returns early, move this check somewhere else, or fix cursor move, so it always fires
+    wlr_xwayland_surface_configure(client->surface.xwayland,
+                                   client->geom.x,
+                                   client->geom.y,
+                                   client->surface.xwayland->width,
+                                   client->surface.xwayland->height);
   }
   else{
     updateborders(client, client->surface.xdg->current.geometry.width, client->surface.xdg->current.geometry.height);
@@ -1175,6 +1181,13 @@ void cursorbutton(struct wl_listener *listener, void *data){
           gclient = NULL;
           return;
       }
+#ifdef XWAYLAND
+      if(client->type == X11 && client->surface.xwayland->override_redirect){
+        cursor_mode = CursorPassthrough;
+        gclient = NULL;
+        return;
+      }
+#endif
 
       cursor_mode = CursorMove;
       setfocus(client);
@@ -1191,6 +1204,13 @@ void cursorbutton(struct wl_listener *listener, void *data){
         gclient = NULL;
         return;
       }
+#ifdef XWAYLAND
+      if(client->type == X11 && client->surface.xwayland->override_redirect){
+        cursor_mode = CursorPassthrough;
+        gclient = NULL;
+        return;
+      }
+#endif
 
       cursor_mode = CursorResize;
       setfocus(client);
@@ -1388,8 +1408,8 @@ void commitpopup(struct wl_listener *listener, void *data){
   } 
   else{
     struct Monitor *mon = client->mon;
-    box.x = mon->m.x - client->scene_tree->node.x - client->surface.xdg->current.geometry.x;
-    box.y = mon->m.y - client->scene_tree->node.y - client->surface.xdg->current.geometry.y;
+    box.x = mon->m.x - client->scene_tree->node.x + client->surface.xdg->current.geometry.x;
+    box.y = mon->m.y - client->scene_tree->node.y + client->surface.xdg->current.geometry.y;
     box.width = mon->m.width;
     box.height = mon->m.height;
   }

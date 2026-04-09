@@ -191,6 +191,11 @@ typedef struct{
   enum wl_output_transform rotation;
 }MonitorRule;
 
+struct PointerConstraint{
+  struct wlr_pointer_constraint_v1 *constraint;
+  struct wl_listener destroy;
+};
+
 static void cursormotion(struct wl_listener *listener, void *data);
 static void seatsetselection(struct wl_listener *listener, void *data);
 static void seatrequestcursor(struct wl_listener *listener, void *data);
@@ -209,7 +214,7 @@ static void decoration_set_mode(struct wl_listener *listener, void *data);
 static void decoration_destroy(struct wl_listener *listener, void *data);
 static void seatsetprimaryselection(struct wl_listener *listener, void *data);
 static void createkeyboard(struct wlr_input_device *device);
-static void createpointer(struct wlr_input_device *device);
+static void createpointer(struct wlr_pointer *pointer);
 static void processcursormotion(uint32_t time);
 static void newlayersurface(struct wl_listener *listener, void *data);
 static void startdrag(struct wl_listener *listener, void *data);
@@ -228,6 +233,10 @@ static void outputmanagerapply(struct wl_listener *listener, void *data);
 static void outputmanagertest(struct wl_listener *listener, void *data);
 static void newpopup(struct wl_listener *listener, void *data);
 static void commitpopup(struct wl_listener *listener, void *data);
+static void createpointerconstraint(struct wl_listener *listener, void *data);
+static void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint);
+static void destroypointerconstraint(struct wl_listener *listener, void *data);
+static void cursorwarptohint(void);
 static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
 static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void setfocus(struct Client *client);
@@ -269,6 +278,7 @@ static struct wl_listener request_set_selection = {.notify = seatsetselection};
 static struct wl_listener output_manager_apply = {.notify = outputmanagerapply};
 static struct wl_listener output_manager_test = {.notify = outputmanagertest};
 static struct wl_listener request_set_primary_selection = {.notify = seatsetprimaryselection};
+static struct wl_listener new_pointer_constraint = {.notify = createpointerconstraint};
 static struct wl_listener request_cursor = {.notify = seatrequestcursor};
 static struct wl_listener output_layout_change = {.notify = changeoutputlayout};
 static struct wl_listener new_decoration = {.notify = newdecoration};
@@ -287,6 +297,9 @@ static struct wlr_output_manager_v1 *output_manager;
 static struct wlr_viewporter *viewporter;
 static struct wlr_fractional_scale_manager_v1 *fractional_scale;
 static struct wlr_xdg_activation_v1 *activation;
+static struct wlr_pointer_constraints_v1 *pointer_constraints;
+static struct wlr_relative_pointer_manager_v1 *relative_pointer_mgr;
+static struct wlr_pointer_constraint_v1 *active_constraint;
 
 static struct wlr_cursor *cursor;
 static uint32_t cursor_mode;
@@ -299,6 +312,7 @@ static struct wlr_xdg_shell *xdg_shell;
 
 static struct wlr_layer_shell_v1 *layer_shell;
 static struct wlr_xdg_decoration_manager_v1 *decoration_manager;
+
 static struct wlr_scene_tree *layers[NUM_LAYERS];
 static const  int layermap[] = { LyrBg, LyrBottom, LyrTop, LyrOverlay};
 
@@ -987,8 +1001,46 @@ void createkeyboard(struct wlr_input_device *device){
   wl_list_insert(&keyboards, &keyboard->link);
 }
 
-void createpointer(struct wlr_input_device *device){
-  wlr_cursor_attach_input_device(cursor, device);
+void createpointer(struct wlr_pointer *pointer){
+	struct libinput_device *device;
+	if (wlr_input_device_is_libinput(&pointer->base)
+			&& (device = wlr_libinput_get_device_handle(&pointer->base))){
+
+		if(libinput_device_config_tap_get_finger_count(device)){
+			libinput_device_config_tap_set_enabled(device, tap_to_click);
+			libinput_device_config_tap_set_drag_enabled(device, tap_and_drag);
+			libinput_device_config_tap_set_drag_lock_enabled(device, drag_lock);
+			libinput_device_config_tap_set_button_map(device, button_map);
+		}
+
+		if(libinput_device_config_scroll_has_natural_scroll(device))
+			libinput_device_config_scroll_set_natural_scroll_enabled(device, natural_scrolling);
+
+		if(libinput_device_config_dwt_is_available(device))
+			libinput_device_config_dwt_set_enabled(device, disable_while_typing);
+
+		if(libinput_device_config_left_handed_is_available(device))
+			libinput_device_config_left_handed_set(device, left_handed);
+
+		if(libinput_device_config_middle_emulation_is_available(device))
+			libinput_device_config_middle_emulation_set_enabled(device, middle_button_emulation);
+
+		if(libinput_device_config_scroll_get_methods(device) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
+			libinput_device_config_scroll_set_method(device, scroll_method);
+
+		if(libinput_device_config_click_get_methods(device) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
+			libinput_device_config_click_set_method(device, click_method);
+
+		if(libinput_device_config_send_events_get_modes(device))
+			libinput_device_config_send_events_set_mode(device, send_events_mode);
+
+		if(libinput_device_config_accel_is_available(device)){
+			libinput_device_config_accel_set_profile(device, accel_profile);
+			libinput_device_config_accel_set_speed(device, accel_speed);
+		}
+	}
+
+  wlr_cursor_attach_input_device(cursor, &pointer->base);
 }
 
 void createinput(struct wl_listener *listener, void *data){
@@ -998,7 +1050,7 @@ void createinput(struct wl_listener *listener, void *data){
       createkeyboard(device);
       break;
     case WLR_INPUT_DEVICE_POINTER:
-      createpointer(device);
+      createpointer(wlr_pointer_from_input_device(device));
       break;
     default:
       break;
@@ -1110,6 +1162,10 @@ void processcursormotion(uint32_t time){
     if(seat->pointer_state.focused_surface){
       wlr_seat_pointer_clear_focus(seat);
     }
+    if(active_constraint){
+      wlr_pointer_constraint_v1_send_deactivated(active_constraint);
+      active_constraint = NULL;
+    }
     return;
   }
 
@@ -1146,10 +1202,32 @@ void processcursormotion(uint32_t time){
   //setfocus(client);
   wlr_seat_pointer_notify_enter(seat, subsurface, sub_sx, sub_sy);
   wlr_seat_pointer_notify_motion(seat, time, sub_sx, sub_sy);
+  struct wlr_surface *focused = seat->pointer_state.focused_surface;
+  
+  if(active_constraint && active_constraint->surface != focused){
+    wlr_pointer_constraint_v1_send_deactivated(active_constraint);
+    active_constraint = NULL;
+  }
+  
+  if(!active_constraint && focused){
+    struct wlr_pointer_constraint_v1 *constraint = wlr_pointer_constraints_v1_constraint_for_surface(pointer_constraints, focused, seat);
+    if(constraint){
+      active_constraint = constraint;
+      wlr_pointer_constraint_v1_send_activated(constraint);
+    }
+  }
 };
 
 void cursormotion(struct wl_listener *listener, void *data){
   struct wlr_pointer_motion_event *event = data;
+  if(active_constraint && active_constraint->surface == seat->pointer_state.focused_surface){
+    wlr_relative_pointer_manager_v1_send_relative_motion(relative_pointer_mgr, seat, (uint64_t)event->time_msec * 1000,
+                                                         event->delta_x, event->delta_y, event->unaccel_dx, event->unaccel_dy);
+
+    if(active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED){
+      return;
+    }
+  }
   wlr_cursor_move(cursor, &event->pointer->base, event->delta_x, event->delta_y);
   processcursormotion(event->time_msec);
 }
@@ -1231,6 +1309,55 @@ void cursorbutton(struct wl_listener *listener, void *data){
   }
 }
 
+void cursorwarptohint(void){
+	struct Client *client = NULL;
+	double sx = active_constraint->current.cursor_hint.x;
+	double sy = active_constraint->current.cursor_hint.y;
+
+	toplevel_from_wlr_surface(active_constraint->surface, &client, NULL);
+	if(client && active_constraint->current.cursor_hint.enabled){
+		wlr_cursor_warp(cursor, NULL, sx + client->geom.x + client->bw, sy + client->geom.y + client->bw);
+		wlr_seat_pointer_warp(active_constraint->seat, sx, sy);
+	}
+}
+
+
+void createpointerconstraint(struct wl_listener *listener, void *data){
+  struct PointerConstraint *pointer_constraint = calloc(1, sizeof(*pointer_constraint));
+	pointer_constraint->constraint = data;
+  pointer_constraint->destroy.notify = destroypointerconstraint;
+  wl_signal_add(&pointer_constraint->constraint->events.destroy, &pointer_constraint->destroy);
+}
+
+void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint){
+	if(active_constraint == constraint){
+		return;
+  }
+
+	if(active_constraint){
+		wlr_pointer_constraint_v1_send_deactivated(active_constraint);
+  }
+
+	active_constraint = constraint;
+	wlr_pointer_constraint_v1_send_activated(constraint);
+}
+
+
+void destroypointerconstraint(struct wl_listener *listener, void *data){
+	struct PointerConstraint *pointer_constraint = wl_container_of(listener, pointer_constraint, destroy);
+
+	if(active_constraint == pointer_constraint->constraint){
+		cursorwarptohint();
+		active_constraint = NULL;
+	}
+
+	wl_list_remove(&pointer_constraint->destroy.link);
+	free(pointer_constraint);
+}
+
+
+
+
 void mapnotify(struct wl_listener *listener, void *data){
   struct wlr_xdg_toplevel *toplevel = data;
   struct Client *client = wl_container_of(listener, client, map);
@@ -1260,6 +1387,7 @@ void mapnotify(struct wl_listener *listener, void *data){
   }
 
   wl_list_insert(&clients, &client->link);
+  setfocus(client);
 }
 
 void unmapnotify(struct wl_listener *listener, void *data){
@@ -1662,6 +1790,11 @@ void init(){
   decoration_manager = wlr_xdg_decoration_manager_v1_create(server->display);
   wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
 
+	pointer_constraints = wlr_pointer_constraints_v1_create(server->display);
+	wl_signal_add(&pointer_constraints->events.new_constraint, &new_pointer_constraint);
+
+  relative_pointer_mgr = wlr_relative_pointer_manager_v1_create(server->display);
+
   layer_shell = wlr_layer_shell_v1_create(server->display, 3);
   wl_signal_add(&layer_shell->events.new_surface, &new_layer_surface);
   for(size_t i = 0; i < NUM_LAYERS; i++){
@@ -1747,6 +1880,7 @@ void destroylisteners(){
   wl_list_remove(&cursor_button.link);
   wl_list_remove(&cursor_axis.link);
   wl_list_remove(&cursor_frame.link);
+  wl_list_remove(&new_pointer_constraint.link);
   wl_list_remove(&new_client.link);
   wl_list_remove(&new_popup.link);
   wl_list_remove(&new_layer_surface.link);

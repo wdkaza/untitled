@@ -1,5 +1,5 @@
 PKG_CONFIG ?= pkg-config
-PKGS = wayland-server xkbcommon xwayland
+PKGS = wayland-server xkbcommon xwayland libinput
 
 # TODO : remake makefile myself, this was done by chatgpt bcs i couldnt compile for some reason, maybe switch to meson
 # another comment,: holy moly this makefile is the worst, i will not make the repo public until it looks good and made by me(comment to whoever could be reading my old commits :D),

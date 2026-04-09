@@ -1,4 +1,4 @@
-# untitled (pre-aplha 0.1.8)
+# untitled (pre-aplha 0.1.9)
 A minimal wayland window manager inspired by dwl  
 Why "untitled"? The state of it is so early im still not sure of what to call it and i dont know what i want it to be, its just your another window manager at the moment  
 sort of a fork of dwl but im just using dwl as a kickstart for most pieces of code

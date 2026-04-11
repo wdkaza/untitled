@@ -23,5 +23,5 @@ i would love to try making animations, ~~adding scenefx support~~ custom rendere
 # bugs
 - [ ] bugs
 - [ ] actually monitor scale doesnt work, annoying bug, i want to fix it and monrules overall are so hard to setup up(monrules dont work)
-- [ ] drag icon is offset and doesnt go semi transparent as on other window managers when its outside weston-dnd window
 - [ ] (almost)popups after a resize still have a weird position, but now render atleast, something is wrong with cursor cordinates
+- [ ] you can fullscreen popups, and "focused_client" could be given to popups as well, example: steam popups when you hover over store

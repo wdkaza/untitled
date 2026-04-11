@@ -1126,8 +1126,8 @@ static struct Client *clientat(double x, double y){// not the best solution but 
     else{
       cw = client->surface.xdg->current.geometry.width;
       ch = client->surface.xdg->current.geometry.height;
-    }
-    
+    }    
+
     if(x >= cx && x < cx + cw && y >= cy && y < cy + ch){
       return client;
     } 
@@ -1387,6 +1387,7 @@ void mapnotify(struct wl_listener *listener, void *data){
   }
 
   wl_list_insert(&clients, &client->link);
+  focused_client = client;
   setfocus(client);
 }
 
@@ -1443,6 +1444,9 @@ void destroynotify(struct wl_listener *listener, void *data){
 
 void destroynotifyx11(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, destroy);
+  if(focused_client == client){
+    focused_client = NULL; //could be ueseless check, TODO check if check is checking nothing
+  }
   if(seat->keyboard_state.focused_surface == client->surface.xwayland->surface){
     wlr_seat_keyboard_clear_focus(seat);
   }
@@ -1555,7 +1559,6 @@ void newclient(struct wl_listener *listener, void *data){
   client->type = XDGShell;
   client->mon = current_monitor;
   client->desktop_index = current_desktop;
-  focused_client = client; // TODO : temp fix, maybe move somewhere else, same with x11
   client->bw = 2;
   for(int i = 0; i < 4; i++){
     client->border[i] = NULL;
@@ -1657,7 +1660,6 @@ void newclientx11(struct wl_listener *listener, void *data){
   client->mon = current_monitor;
   client->type = X11;
   client->desktop_index = current_desktop;
-  focused_client = client; // TODO : temp fix
   if(xsurface->override_redirect){
     client->isfloating = 1;
   }

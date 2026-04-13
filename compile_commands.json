@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "file": "src/main.c",
+    "arguments": [
+      "cc",
+      "-c",
+      "src/main.c",
+      "-g",
+      "-Werror",
+      "-DWLR_USE_UNSTABLE",
+      "-DXWAYLAND",
+      "-I/home/wdkaza/packages/wlroots/include",
+      "-I/home/wdkaza/packages/wlroots/build",
+      "-I/home/wdkaza/packages/wlroots/build/protocol",
+      "-I/usr/include/pixman-1",
+      "-I/home/wdkaza/packages/wlroots/build/include",
+      "-Isrc",
+      "-fsanitize=address",
+      "-o",
+      "src/main.o"
+    ],
+    "directory": "/home/wdkaza/code/untitled",
+    "output": "src/main.o"
+  }
+]

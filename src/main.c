@@ -237,6 +237,7 @@ static void createpointerconstraint(struct wl_listener *listener, void *data);
 static void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint);
 static void destroypointerconstraint(struct wl_listener *listener, void *data);
 static void cursorwarptohint(void);
+static void urgent(struct wl_listener *listener, void *data);
 static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
 static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void setfocus(struct Client *client);
@@ -276,6 +277,7 @@ static struct wl_listener cursor_button = {.notify = cursorbutton};
 static struct wl_listener cursor_frame = {.notify = cursorframe};
 static struct wl_listener request_set_selection = {.notify = seatsetselection};
 static struct wl_listener output_manager_apply = {.notify = outputmanagerapply};
+static struct wl_listener request_activate = {.notify = urgent};
 static struct wl_listener output_manager_test = {.notify = outputmanagertest};
 static struct wl_listener request_set_primary_selection = {.notify = seatsetprimaryselection};
 static struct wl_listener new_pointer_constraint = {.notify = createpointerconstraint};
@@ -388,6 +390,7 @@ void killclient(const Arg *arg){
 void setfocus(struct Client *client){
   if(client == NULL) return;
   focused_client = client;
+  client->isurgent = 0;
   struct wlr_surface *prev_surface = seat->keyboard_state.focused_surface;
   struct wlr_surface *surface = NULL;
   if(client->type == X11){
@@ -927,6 +930,18 @@ void changeoutputlayout(struct wl_listener *listener, void *data){
 
   wlr_output_manager_v1_set_configuration(output_manager, config);
 }
+
+void urgent(struct wl_listener *listener, void *data){
+	struct wlr_xdg_activation_v1_request_activate_event *event = data;
+	struct Client *client = NULL;
+	toplevel_from_wlr_surface(event->surface, &client, NULL);
+	if(!client || client == focused_client){
+		return;
+  }
+
+	client->isurgent = 1;
+}
+
 
 // from dwl
 bool keybinding(uint32_t mods, xkb_keysym_t sym)
@@ -1755,7 +1770,9 @@ void init(){
   wlr_xdg_output_manager_v1_create(server->display, output_layout);
   viewporter = wlr_viewporter_create(server->display);
 	fractional_scale = wlr_fractional_scale_manager_v1_create(server->display, 1);
-  //activation = wlr_xdg_activation_v1_create(display);
+
+  activation = wlr_xdg_activation_v1_create(server->display);
+	wl_signal_add(&activation->events.request_activate, &request_activate);
 
   output_manager = wlr_output_manager_v1_create(server->display);
   wl_signal_add(&output_manager->events.apply, &output_manager_apply);

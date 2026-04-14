@@ -138,6 +138,7 @@ struct Client{
 
 typedef union{
   int i;
+  uint32_t ui;
   float f;
   const void *v;
 }Arg;
@@ -243,6 +244,7 @@ static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config,
 static void setfocus(struct Client *client);
 static void spawn(const Arg *arg);
 static void killclient(const Arg *arg);
+static void moveresize(const Arg *arg);
 static void togglefullscreen(const Arg *arg);
 static void cyclefocus(const Arg *arg);
 static void changedesktop(const Arg *arg);
@@ -425,7 +427,7 @@ void setfocus(struct Client *client){
   }  
 }
 
-static void updateborders(struct Client *client, int width, int height){
+void updateborders(struct Client *client, int width, int height){
   //t
   wlr_scene_rect_set_size(client->border[0], width, client->bw);
   wlr_scene_node_set_position(&client->border[0]->node, 0, 0);
@@ -460,17 +462,17 @@ void arrangelayer(struct Monitor *mon, struct wl_list *list, struct wlr_box *usa
   }
 }
 
-static void outputmanagerapply(struct wl_listener *listener, void *data){
+void outputmanagerapply(struct wl_listener *listener, void *data){
   struct wlr_output_configuration_v1 *config = data;
   outputmanagerapplyortest(config, 0);
 }
 
-static void outputmanagertest(struct wl_listener *listener, void *data){
+void outputmanagertest(struct wl_listener *listener, void *data){
   struct wlr_output_configuration_v1 *config = data;
   outputmanagerapplyortest(config, 1);
 }
 
-static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test){
+void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test){
   struct wlr_output_configuration_head_v1 *config_head;
   int ok = 1;
 
@@ -701,7 +703,7 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
   }
 }
 
-static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
+void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
   struct wlr_subsurface *subsurface;
   wl_list_for_each(subsurface, &surface->current.subsurfaces_below, current.link){
     rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
@@ -727,12 +729,12 @@ static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, str
   }
 }
 
-static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data){
+void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data){
   struct timespec *now = data;
   wlr_surface_send_frame_done(surface, now);
 }
 
-static void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy){
+void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy){
   struct wlr_xdg_popup *popup;
   wl_list_for_each(popup, &xdg->popups, link){
     if(!popup->base->surface->mapped) continue;
@@ -1124,7 +1126,7 @@ void cursorresize(){
   wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, new_width, new_height);
 }
 
-static struct Client *clientat(double x, double y){// not the best solution but i give up thinking of something easy
+struct Client *clientat(double x, double y){// not the best solution but i give up thinking of something easy
   struct Client *client;
   wl_list_for_each(client, &clients, link){
     struct wlr_surface *surface = client_surface(client);
@@ -1263,58 +1265,63 @@ void cursorframe(struct wl_listener *listener, void *data){
   wlr_seat_pointer_notify_frame(seat);
 }
 
-void cursorbutton(struct wl_listener *listener, void *data){
-  struct wlr_pointer_button_event *event = data;
-  switch(event->state){
-  case WL_POINTER_BUTTON_STATE_PRESSED:
-    if(event->button == BTN_LEFT && (wlr_keyboard_get_modifiers(wlr_seat_get_keyboard(seat)) & WLR_MODIFIER_ALT)){
-      struct Client *client = clientat(cursor->x, cursor->y);
-      if(!client){
-          cursor_mode = CursorPassthrough;
-          gclient = NULL;
-          return;
-      }
+void moveresize(const Arg *arg){
+  struct Client *client = clientat(cursor->x, cursor->y);
+  if(!client){
+      cursor_mode = CursorPassthrough;
+      gclient = NULL;
+      return;
+  }
+
 #ifdef XWAYLAND
-      if(client->type == X11 && client->surface.xwayland->override_redirect){
-        cursor_mode = CursorPassthrough;
-        gclient = NULL;
-        return;
-      }
+  if(client->type == X11 && client->surface.xwayland->override_redirect){
+    cursor_mode = CursorPassthrough;
+    gclient = NULL;
+    return;
+  }
 #endif
 
+  switch(cursor_mode = arg->ui){
+    case CursorMove:
       cursor_mode = CursorMove;
       setfocus(client);
       gclient = client;
       grab_x = cursor->x - client->scene_tree->node.x;
       grab_y = cursor->y - client->scene_tree->node.y;
       client->isfloating = true;
-      return;
-    }
-    if(event->button == BTN_RIGHT && (wlr_keyboard_get_modifiers(wlr_seat_get_keyboard(seat)) & WLR_MODIFIER_ALT)){
-      struct Client *client = clientat(cursor->x, cursor->y);
-      if(!client){
-        cursor_mode = CursorPassthrough;
-        gclient = NULL;
-        return;
-      }
-#ifdef XWAYLAND
-      if(client->type == X11 && client->surface.xwayland->override_redirect){
-        cursor_mode = CursorPassthrough;
-        gclient = NULL;
-        return;
-      }
-#endif
-
+      break;
+    case CursorResize:
       cursor_mode = CursorResize;
       setfocus(client);
       gclient = client;
       grab_x = cursor->x - client->scene_tree->node.x;
       grab_y = cursor->y - client->scene_tree->node.y;
       client->isfloating = true;
-      return;
-    }
+      return; 
+  }
+}
+
+void cursorbutton(struct wl_listener *listener, void *data){
+  struct wlr_pointer_button_event *event = data;
+  struct wlr_keyboard *keyboard;
+  uint32_t mods;
+  const Button *b;
+  switch(event->state){
+  case WL_POINTER_BUTTON_STATE_PRESSED:{
+    struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
+    uint32_t mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
+
+    keyboard = wlr_seat_get_keyboard(seat);
+    mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
     wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
+    for(b = buttons; b < END(buttons); b++){
+      if(CLEANMASK(mods) == CLEANMASK(b->mod) && event->button == b->button && b->func){
+        b->func(&b->arg);
+        return;
+      }
+    }
     return;
+  }
   case WL_POINTER_BUTTON_STATE_RELEASED:
     // BUG : monitors focus could be broken here
     cursor_mode = CursorPassthrough;

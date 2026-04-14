@@ -12,9 +12,9 @@ static const float unfocused_border_color[] = {0.0f, 1.0f, 0.0f, 1.0f};
 static const float fullscreen_bg[] = {0.2f, 0.2f, 0.2f, 1.0f};
 
 static const MonitorRule monrules[] = {
-// name, scale, x, y, rotation
-  {"NULL", 1,  -1,  -1,     WL_OUTPUT_TRANSFORM_NORMAL},
-  //{"HDMI-A-1", 1, -1, -1, WL_OUTPUT_TRANSFORM_NORMAL},
+// name,   scale, x, y, rotation
+  {"HDMI", 1,0,0, WL_OUTPUT_TRANSFORM_NORMAL},
+  {NULL,   2,0,1080, WL_OUTPUT_TRANSFORM_NORMAL},
 };
 
 /* Trackpad */
@@ -72,10 +72,10 @@ static const Key keys[] = {
   //{MODKEY,                    XKB_KEY_z,           changedesktop,    {.i = 2}},
   //{MODKEY,                    XKB_KEY_3,           changedesktop,    {.i = 3}},
 };
-/*
-static const Button Buttons[] = {
-  {MODKEY, BTN_LEFT, moveresize, {.i = CursorMove}},
-  {MODKEY, BTN_RIGHT, moveresize, {.i = CursorResize}},
+
+static const Button buttons[] = {
+  {MODKEY, BTN_LEFT, moveresize, {.ui = CursorMove}},
+  //{MODKEY, BTN_MIDDLE, ... , ...},
+  {MODKEY, BTN_RIGHT, moveresize, {.ui = CursorResize}},
 };
-*/
 

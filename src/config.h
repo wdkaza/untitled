@@ -14,7 +14,7 @@ static const float fullscreen_bg[] = {0.2f, 0.2f, 0.2f, 1.0f};
 static const MonitorRule monrules[] = {
 // name,   scale, x, y, rotation
   {"HDMI", 1,0,0, WL_OUTPUT_TRANSFORM_NORMAL},
-  {NULL,   2,0,1080, WL_OUTPUT_TRANSFORM_NORMAL},
+  {NULL,   1,0,1080, WL_OUTPUT_TRANSFORM_NORMAL},
 };
 
 /* Trackpad */

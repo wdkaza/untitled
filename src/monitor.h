@@ -21,8 +21,8 @@ struct Monitor{
   //
   // float mfact;
   // uint32_t nmaster;
-  // bool asleep;
 
+  bool asleep;
 
   struct wl_listener frame;
   struct wl_listener request_state;

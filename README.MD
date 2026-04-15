@@ -1,5 +1,5 @@
 # untitled (pre-aplha 0.1.10)
-A minimal wayland window manager inspired by dwl  
+A minimal wayland window manager inspired by dwl, mangowc, newwm 
 Why "untitled"? The state of it is so early im still not sure of what to call it and i dont know what i want it to be, its just your another window manager at the moment  
 sort of a fork of dwl but im just using dwl as a kickstart for most pieces of code
 And well since its not even an alpha yet, wont write much here, but my TODO list  
@@ -16,6 +16,7 @@ And well since its not even an alpha yet, wont write much here, but my TODO list
 - [x] bars(waybar, etc) support(only half done)
 - [x] xwayland support(highest priority(DONE!!))
 - [ ] fixing the remaining bugs for pre-aplha
+- [ ] fixing damage in the renderer currently not working
 - [ ] remake the README for an alpha version
 - [ ] making it stable and usable, trying to daily drive
 

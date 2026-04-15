@@ -40,6 +40,7 @@
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 #include <wlr/types/wlr_linux_drm_syncobj_v1.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_ext_data_control_v1.h>
 #include <wlr/types/wlr_output_layout.h>
 #include <wlr/types/wlr_output_management_v1.h>
 #include <wlr/types/wlr_output_power_management_v1.h>
@@ -221,6 +222,7 @@ static void newlayersurface(struct wl_listener *listener, void *data);
 static void startdrag(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
 static void destroydragicon(struct wl_listener *listener, void *data);
+static void powermanagersetmode(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
@@ -283,6 +285,7 @@ static struct wl_listener request_activate = {.notify = urgent};
 static struct wl_listener output_manager_test = {.notify = outputmanagertest};
 static struct wl_listener request_set_primary_selection = {.notify = seatsetprimaryselection};
 static struct wl_listener new_pointer_constraint = {.notify = createpointerconstraint};
+static struct wl_listener output_power_manager_set_mode = {.notify = powermanagersetmode};
 static struct wl_listener request_cursor = {.notify = seatrequestcursor};
 static struct wl_listener output_layout_change = {.notify = changeoutputlayout};
 static struct wl_listener new_decoration = {.notify = newdecoration};
@@ -304,6 +307,9 @@ static struct wlr_xdg_activation_v1 *activation;
 static struct wlr_pointer_constraints_v1 *pointer_constraints;
 static struct wlr_relative_pointer_manager_v1 *relative_pointer_mgr;
 static struct wlr_pointer_constraint_v1 *active_constraint;
+static struct wlr_output_power_manager_v1 *power_manager;
+//static struct wlr_idle_notifier_v1 *idle_notifier;
+//static struct wlr_idle_inhibit_manager_v1 *idle_inihibit_manager;
 
 static struct wlr_cursor *cursor;
 static uint32_t cursor_mode;
@@ -717,6 +723,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
       .width = surface->current.width,
       .height = surface->current.height,
     };
+
     pixman_region32_t damage;
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
@@ -750,6 +757,7 @@ void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_
 
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
+  if(mon->asleep) return;
 
   //glClearColor(0.0, 0.0, 0.0, 1.0);
   //glClear(GL_COLOR_BUFFER_BIT);
@@ -776,6 +784,7 @@ void rendermon(struct wl_listener *listener, void *data){
     struct wlr_surface *surface = NULL;
     struct wlr_texture *texture = NULL;
     surface = client_surface(client);
+
     if(!surface || !surface->mapped) continue;
 
     int sx = client->scene_tree->node.x - mon->m.x;
@@ -785,7 +794,9 @@ void rendermon(struct wl_listener *listener, void *data){
       sx -= client->surface.xdg->current.geometry.x;
       sy -= client->surface.xdg->current.geometry.y;
     }
+
     rendersurface(server->mw_renderer, mon, surface, sx, sy);
+
     if(client->type == XDGShell){
       renderpopups(server->mw_renderer, mon, client->surface.xdg, sx, sy);
     }
@@ -836,16 +847,34 @@ void requeststatemon(struct wl_listener *listener, void *data){
 
 void destroymon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, destroy);
-  // this is a bit retarded, i need to make a seperate function to also move the clients to the newmon, so this is a temp solution
-  // TODO
-  if(current_monitor == mon && !wl_list_empty(&mons)){
-    struct Monitor *newmon;
-    wl_list_for_each(newmon, &mons, link){
-      if(mon != newmon){
-        current_monitor = newmon;
+  // still TODO : move all of the clients move code to another function later
+  struct Monitor *newmon = NULL;
+  if(!wl_list_empty(&mons)){
+    struct Monitor *monitor;
+    wl_list_for_each(monitor, &mons, link){
+      if(monitor != mon){
+        newmon = monitor;
         break;
       }
     }
+  }
+
+  struct Client *client;
+  wl_list_for_each(client, &clients, link){
+    if(client->mon == mon){
+      client->mon = newmon;
+      if(newmon && client->scene_tree){
+        wlr_scene_node_set_position(&client->scene_tree->node,
+                                    client->geom.x - mon->m.x + newmon->m.x,
+                                    client->geom.y - mon->m.y + newmon->m.y);
+        client->geom.x = client->scene_tree->node.x;
+        client->geom.y = client->scene_tree->node.y;// COMEBACK
+      }
+    }
+  }
+
+  if(current_monitor == mon){
+    current_monitor = newmon;
   }
   wl_list_remove(&mon->request_state.link);
   wl_list_remove(&mon->frame.link);
@@ -864,6 +893,7 @@ void createmon(struct wl_listener *listener, void *data){
   mon->wlr_output = wlr_output;
   mon->m.x = -1;
   mon->m.y = -1;
+  mon->asleep = 0;
 
   mw_renderer_init_output(server->mw_renderer, mon);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
@@ -933,6 +963,27 @@ void changeoutputlayout(struct wl_listener *listener, void *data){
   wlr_output_manager_v1_set_configuration(output_manager, config);
 }
 
+void powermanagersetmode(struct wl_listener *listener, void *data){
+  struct wlr_output_power_v1_set_mode_event *event = data;
+  struct Monitor *mon = event->output->data;
+  struct wlr_output_state state;
+  wlr_output_state_init(&state);
+
+  switch(event->mode){
+    case ZWLR_OUTPUT_POWER_V1_MODE_OFF:
+      mon->asleep = 1;
+      wlr_output_state_set_enabled(&state, false);
+      break;
+    case ZWLR_OUTPUT_POWER_V1_MODE_ON:
+      mon->asleep = 0;
+      wlr_output_state_set_enabled(&state, true);
+    break;
+  }
+
+  wlr_output_commit_state(mon->wlr_output, &state);
+  wlr_output_state_finish(&state);
+}
+
 void urgent(struct wl_listener *listener, void *data){
 	struct wlr_xdg_activation_v1_request_activate_event *event = data;
 	struct Client *client = NULL;
@@ -959,8 +1010,6 @@ bool keybinding(uint32_t mods, xkb_keysym_t sym)
 	}
 	return 0;
 }
-
-
 
 void keyboardmodifiers(struct wl_listener *listener, void *data){
   struct Keyboard *keyboard = wl_container_of(listener, keyboard, modifier);
@@ -1097,7 +1146,6 @@ void cursormove(){
   }
   if(client->type == X11){
     updateborders(client, client->surface.xwayland->width, client->surface.xwayland->height);
-    // TODO : cursormove() returns early, move this check somewhere else, or fix cursor move, so it always fires
     wlr_xwayland_surface_configure(client->surface.xwayland,
                                    client->geom.x,
                                    client->geom.y,
@@ -1154,14 +1202,7 @@ struct Client *clientat(double x, double y){// not the best solution but i give 
 
 void processcursormotion(uint32_t time){
 	wlr_scene_node_set_position(&drag_icon->node, (int)round(cursor->x), (int)round(cursor->y));
-  if(cursor_mode == CursorMove){
-    cursormove();
-    return;
-  }
-  if(cursor_mode == CursorResize){
-    cursorresize();
-    return;
-  }
+
   struct wlr_output_layout_output *loutput;
   struct Monitor *mon;
   wl_list_for_each(mon, &mons, link){
@@ -1171,6 +1212,15 @@ void processcursormotion(uint32_t time){
       current_monitor = mon;
       break;
     }
+  }
+
+  if(cursor_mode == CursorMove){
+    cursormove();
+    return;
+  }
+  if(cursor_mode == CursorResize){
+    cursorresize();
+    return;
   }
 
   struct Client *client = clientat(cursor->x, cursor->y);
@@ -1399,8 +1449,13 @@ void mapnotify(struct wl_listener *listener, void *data){
 
   if(client->type == X11){
     wlr_scene_node_set_position(&client->scene_tree->node, client->surface.xwayland->x, client->surface.xwayland->y);
-                                 client->geom.x = client->surface.xwayland->x;
-                                 client->geom.y = client->surface.xwayland->y;
+    client->geom.x = client->surface.xwayland->x;
+    client->geom.y = client->surface.xwayland->y;
+  }
+  else{
+    wlr_scene_node_set_position(&client->scene_tree->node, client->mon->m.x, client->mon->m.y);
+    client->geom.x = client->mon->m.x;
+    client->geom.y = client->mon->m.y;
   }
 
   for(int i = 0; i < 4; i++){
@@ -1418,6 +1473,14 @@ void unmapnotify(struct wl_listener *listener, void *data){
   if(client == focused_client){
     focused_client = NULL;
   }
+  /*
+  if(client->scene_tree){
+    wlr_scene_node_destroy(&client->scene_tree->node);
+    client->scene_tree = NULL;
+  }
+  */
+  // COMEBACK
+
   wl_list_remove(&client->link);
   if(!wl_list_empty(&clients)){
     struct Client *next = wl_container_of(clients.next, next, link);
@@ -1466,9 +1529,6 @@ void destroynotify(struct wl_listener *listener, void *data){
 
 void destroynotifyx11(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, destroy);
-  if(focused_client == client){
-    focused_client = NULL; //could be ueseless check, TODO check if check is checking nothing
-  }
   if(seat->keyboard_state.focused_surface == client->surface.xwayland->surface){
     wlr_seat_keyboard_clear_focus(seat);
   }
@@ -1668,9 +1728,9 @@ void sethintsx11(struct wl_listener *listener, void *data){
     return;
   }
 
-  client->isurgent = xcb_icccm_wm_hints_get_urgency(client->surface.xwayland->hints);
-  // TODO this function is mostly unfunctional right now
-  // used for setting urgency to x11 client
+  if(client != focused_client){
+    client->isurgent = xcb_icccm_wm_hints_get_urgency(client->surface.xwayland->hints);
+  }
 }
 
 void newclientx11(struct wl_listener *listener, void *data){
@@ -1768,6 +1828,11 @@ void init(){
   compositor = wlr_compositor_create(server->display, 6, server->wlr_renderer);
   // TODO : protocols setup here
   wlr_subcompositor_create(server->display);
+	wlr_single_pixel_buffer_manager_v1_create(server->display);
+  wlr_export_dmabuf_manager_v1_create(server->display);
+  wlr_alpha_modifier_v1_create(server->display);
+  wlr_ext_data_control_manager_v1_create(server->display, 1);
+  wlr_presentation_create(server->display, server->wlr_backend, 2);
   wlr_data_device_manager_create(server->display);
   wlr_primary_selection_v1_device_manager_create(server->display);
   wlr_data_control_manager_v1_create(server->display);
@@ -1777,6 +1842,14 @@ void init(){
   wlr_xdg_output_manager_v1_create(server->display, output_layout);
   viewporter = wlr_viewporter_create(server->display);
 	fractional_scale = wlr_fractional_scale_manager_v1_create(server->display, 1);
+
+  power_manager = wlr_output_power_manager_v1_create(server->display);
+  wl_signal_add(&power_manager->events.set_mode, &output_power_manager_set_mode);
+
+  //idle_notifier = wlr_idle_notifier_v1_create(server->display);
+
+  //idle_inihibit_manager = wlr_idle_inhibit_v1_create(server->display);
+  //wl_signal_add(&idle_inihibit_manager->events.new_inhibitor, &new_idle_inhibitor);
 
   activation = wlr_xdg_activation_v1_create(server->display);
 	wl_signal_add(&activation->events.request_activate, &request_activate);
@@ -1852,15 +1925,17 @@ void init(){
 
 void run(){
   const char *socket = wl_display_add_socket_auto(server->display);
+
   if(!socket){
     fprintf(stderr, "failed to init a socket\n");
     exit(1);
   }
-  setenv("WAYLAND_DISPLAY", socket, 1);
+  setenv("WAYLAND_DISPLAY", socket, 1); 
   if(!wlr_backend_start(server->wlr_backend)){
     fprintf(stderr, "failed to start the backend\n");
     exit(1);
   }
+
 	wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
   wl_display_run(server->display);
 }
@@ -1895,6 +1970,7 @@ void destroylisteners(){
   wl_list_remove(&output_layout_change.link);
   wl_list_remove(&output_manager_apply.link);
   wl_list_remove(&output_manager_test.link);
+  wl_list_remove(&output_power_manager_set_mode.link);
   wl_list_remove(&new_input.link);
   wl_list_remove(&request_cursor.link);
   wl_list_remove(&request_set_selection.link);

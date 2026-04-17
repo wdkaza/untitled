@@ -29,6 +29,15 @@ static inline uint32_t client_set_size(struct Client *client, uint32_t width, ui
 	return wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, (int32_t)width, (int32_t)height);
 }
 
+static inline int client_is_unmanaged(struct Client *c){
+#ifdef XWAYLAND
+	if (client_is_x11(c))
+		return c->surface.xwayland->override_redirect;
+#endif
+	return 0;
+}
+
+
 static inline void client_get_geometry(struct Client *client, struct wlr_box *geom){
 #ifdef XWAYLAND
 	if (client_is_x11(client)) {

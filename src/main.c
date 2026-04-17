@@ -1317,7 +1317,7 @@ void cursorframe(struct wl_listener *listener, void *data){
 
 void moveresize(const Arg *arg){
   struct Client *client = clientat(cursor->x, cursor->y);
-  if(!client){
+  if(!client || client->isfullscreen){
       cursor_mode = CursorPassthrough;
       gclient = NULL;
       return;
@@ -1447,6 +1447,19 @@ void mapnotify(struct wl_listener *listener, void *data){
 
   client_get_geometry(client, &client->geom);
 
+  if(client_is_unmanaged(client)){
+    wlr_scene_node_reparent(&client->scene_tree->node, layers[LyrFloat]);
+    wlr_scene_node_set_position(&client->scene_tree->node, client->geom.x, client->geom.y);
+    client_set_size(client, client->geom.width, client->geom.height);
+    // if client wants focus, we give it focus : TODO
+    struct Client *c;
+    wl_list_for_each(c, &clients, link){
+      if(c != client && client->isfullscreen && current_monitor == c->mon){
+        setfullscreen(c, 0);
+      }
+    }
+  }
+
   if(client->type == X11){
     wlr_scene_node_set_position(&client->scene_tree->node, client->surface.xwayland->x, client->surface.xwayland->y);
     client->geom.x = client->surface.xwayland->x;
@@ -1544,7 +1557,10 @@ void destroynotifyx11(struct wl_listener *listener, void *data){
 }
 
 void fullscreennotify(struct wl_listener *listener, void *data){
-  struct Client *client = wl_container_of(listener, client, fullscreen);
+  struct Client *client = wl_container_of(listener, client, fullscreen); 
+#ifdef XWAYLAND
+  if(client_is_x11(client) && client->surface.xwayland->override_redirect) return;
+#endif
   setfullscreen(client, client_wants_fullscreen(client));
 }
 
@@ -1574,6 +1590,9 @@ void resize(struct Client *client, struct wlr_box geo){
 }
 
 void setfullscreen(struct Client *client, int fullscreen){
+#ifdef XWAYLAND
+  if(client_is_x11(client) && client->surface.xwayland->override_redirect) return; 
+#endif
   client->isfullscreen = fullscreen;
   if(!client->mon || !client_surface(client)->mapped){
     return;

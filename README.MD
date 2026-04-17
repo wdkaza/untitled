@@ -1,31 +1,67 @@
-# untitled (pre-aplha 0.1.10)
-A minimal wayland window manager inspired by dwl, mangowc, newwm 
-Why "untitled"? The state of it is so early im still not sure of what to call it and i dont know what i want it to be, its just your another window manager at the moment  
-sort of a fork of dwl but im just using dwl as a kickstart for most pieces of code
-And well since its not even an alpha yet, wont write much here, but my TODO list  
+# untitled (alpha 0.0.0)
+A minimal wayland compositor, insipired heavily by dwl and its forks like mangowc, and newm, hevel
 
-# TODO
-- [x] simple shaders support :o
-- [x] basic window managment
-- [x] popups(pretty much done a few fixes left)
-- [x] moving/resizing windows
-- [x] fullscreen feature
-- [x] amazing monitor layout support(no scale for now)
-- [x] basic config in a .h file for now
-- [x] layers support
-- [x] bars(waybar, etc) support(only half done)
-- [x] xwayland support(highest priority(DONE!!))
-- [ ] fixing the remaining bugs for pre-aplha
-- [ ] fixing damage in the renderer currently not working
-- [ ] remake the README for an alpha version
-- [ ] making it stable and usable, trying to daily drive
+Why "untitled"? i havent decided on the name yet for this project, its still confusing on what i want it to make in my head
 
-these are the goals for it making this window manager to an alpha stage, after doing all that  
-i would love to try making animations, ~~adding scenefx support~~ custom renderer! and more
+"untitled" is currently in alpha, that means that you probably wouldnt be able to you use as a daily
+At the time of writting, the functionallity of the wm is just moving/resizing the windows, closing windows, fullscreen, and thats it
+Thats because pre-alpha focused on making the window manager support as many essential things for a window manager to even work, and support most window types
 
-# bugs
-- [ ] bugs
-- [ ] some windows(mostly any game from steam) is a pain to close/exit, sometimes will leave the shader/window behind
-- [ ] when 2 monitors exist in monrules, windows will spawn on the second mon(bug on itself should spawn on first), even if the monitor isnt plugged in
-- [ ] mon-rules scale is broken, mouse scales, windows dont
-- [ ] you can fullscreen popups, and "focused_client" could be given to popups as well, example: steam popups when you hover over store
+The structure is very similar to dwl, in some parts its juts dwl code, although its not a direct fork of dwl, why rewrite most functions(like some protocols), 
+when they are already done in the best way possible, also i just really like dwl's code structure, its easy to work with
+
+# Whats to come in the alpha
+
+I have a lot of things that i would like to do to this compositor, i will list below the most important one's
+
+Custom renderer - Even though its in the code and seems to work, its not in the best state and requires a lot of work, and pretty much currently there as a POC
+finishing it would unlock eye-candy(rounded corners, blur, shadows), anything you can do with a shader, i would aim to make it customizable, so you could change the shaders easily 
+
+Animations - Simple animations for all the states(opening, swapping windows, fullscreen, etc) of windows
+
+Custom config format - Going away from .h config and making it just a file with options that will be parsed,
+also recompiling the config without restarting the compositor
+
+Tiling/Canvas - is probably going to be the last in order of adding things, im still thinking about it,
+and i want everything else listed above finished before making it usable
+
+# Build & Run
+
+It would be as simple as installing some dependencies, and running
+
+``` sh
+make
+```
+
+```
+./main
+```
+
+BUT i was too lazy to setup the makefile, and currently the makefile is hardcoded for my laptop 
+Since the compositor is barely usable with its limited features, and no one will want to use it,
+the makefile is not really necessary right now
+
+# Features
+
+This is the list of all the features available in the compositor, also serves as a TODO list
+
+
+- [x] Basic window managment (moving/resizing)
+- [x] Popups (a few annoying bugs left)
+- [x] Fullscreen
+- [x] Awesome multi-monitor support
+- [x] Bars support (only tested with wmenu so far)
+- [x] Xwayland support
+- [x] Layers support
+- [ ] Zooming
+- [ ] Damage for the renderer
+......... and more to come, i will expand this list with time
+
+# Bugs
+
+This is more of a list to myself than to anyone else, just reminding myself what bugs are in the compositor currently,
+also to not have it too long i just remove the bugs i fix from the list instead of checking the box
+
+- [ ] popups are broken, they just dont behave sometimes
+- [ ] mon-rules scale is broken, cant scale your monitor
+- [ ] having 2 monitors in the config, and only 1 plugged it would still allow the windows to be on the second monitor(maybe not so much of a bug)

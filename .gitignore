@@ -1,5 +1,5 @@
 .cache
 main.o
-/src/renderer.o
+src/renderer.o
 compile_commands.json
 main

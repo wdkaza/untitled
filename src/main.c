@@ -1476,6 +1476,11 @@ void mapnotify(struct wl_listener *listener, void *data){
     client->border[i]->node.data = client;
   }
 
+  struct Client *window;
+  wl_list_for_each(window, &clients, link){
+    if(window->isfullscreen && window->mon == client->mon) setfullscreen(window, 0);
+  }
+
   wl_list_insert(&clients, &client->link);
   focused_client = client;
   setfocus(client);
@@ -1486,13 +1491,11 @@ void unmapnotify(struct wl_listener *listener, void *data){
   if(client == focused_client){
     focused_client = NULL;
   }
-  /*
-  if(client->scene_tree){
-    wlr_scene_node_destroy(&client->scene_tree->node);
-    client->scene_tree = NULL;
+
+  if(client == gclient){
+    gclient = NULL;
+    cursor_mode = CursorPassthrough;
   }
-  */
-  // COMEBACK
 
   wl_list_remove(&client->link);
   if(!wl_list_empty(&clients)){
@@ -1501,6 +1504,14 @@ void unmapnotify(struct wl_listener *listener, void *data){
   }
   else{
     wlr_seat_keyboard_clear_focus(seat);
+  }
+  if(client->scene_tree){
+    wlr_scene_node_destroy(&client->scene_tree->node);
+    client->scene_tree = NULL;
+    client->scene_surface = NULL;
+    for(int i = 0; i < 4; i++){
+      client->border[i] = NULL;
+    }
   }
 }
 
@@ -1525,11 +1536,6 @@ void destroynotify(struct wl_listener *listener, void *data){
     wlr_seat_keyboard_clear_focus(seat);
   }
 
-  if(client->border[0]){
-    for(int i = 0; i <= 3; i++){
-      wlr_scene_node_destroy(&client->border[i]->node);
-    }
-  }
 
   wl_list_remove(&client->map.link);
   wl_list_remove(&client->unmap.link);

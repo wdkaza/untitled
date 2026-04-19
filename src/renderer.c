@@ -19,8 +19,6 @@
 // its pretty much the same code but updated for wlroots 0.20 and WAY worse lol
 
 
-// TODO damage support, and finishing quad shaders;
-
 static const GLfloat verts[] = {
 	1, 0, // top right
 	0, 0, // top left
@@ -137,6 +135,7 @@ void mw_renderer_link_texture_shader(struct mw_renderer *renderer, struct mw_ren
   shader->scale_y = glGetUniformLocation(shader->shader, "scale_y");
   shader->width = glGetUniformLocation(shader->shader, "width");
   shader->height = glGetUniformLocation(shader->shader, "height");
+  shader->corner_radius = glGetUniformLocation(shader->shader, "corner_radius");
 
   shader->pos_attrib = glGetAttribLocation(shader->shader, "pos");
   shader->tex_attrib = glGetAttribLocation(shader->shader, "texcoord");
@@ -156,9 +155,9 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
                                    float alpha,
                                    pixman_region32_t *damage,
                                    /*const struct wlr_box *src_box,*/
-                                   const struct wlr_box *display_box
+                                   const struct wlr_box *display_box,
                                    /*float alpha        */
-                                   /*float corner_radius*/){
+                                   float corner_radius){
   struct wlr_gles2_texture_attribs attribs;
   wlr_gles2_texture_get_attribs(wlr_texture, &attribs);
 
@@ -173,8 +172,6 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 		}
 		break;
 	case GL_TEXTURE_EXTERNAL_OES:
-    wlr_log(WLR_ERROR, "Failed to render texture: "
-        "GL_TEXTURE_EXTERNAL_OES not supported");
     shader = &renderer->texture_shaders[0].ext;
     break;
 	default:
@@ -202,7 +199,11 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 	glUniform1f(shader->alpha, alpha);
 	glUniform1f(shader->width, display_box->width);
 	glUniform1f(shader->height, display_box->height);
-	//glUniform1f(shader->cornerradius, corner_radius);
+  glUniform1f(shader->offset_x, box->x / wlr_texture->width);
+  glUniform1f(shader->offset_y, box->y / wlr_texture->height);
+  glUniform1f(shader->scale_x, display_box->width / (box->width / wlr_texture->width));
+  glUniform1f(shader->scale_y, display_box->height / (box->height / wlr_texture->height));
+  glUniform1f(shader->corner_radius, corner_radius);
 
 	const GLfloat x1 = box->x / wlr_texture->width;
 	const GLfloat y1 = box->y / wlr_texture->height;
@@ -220,6 +221,7 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
 
 	glEnableVertexAttribArray(shader->pos_attrib);
 	glEnableVertexAttribArray(shader->tex_attrib);
+
 
   /*
   if(damage != NULL){
@@ -257,7 +259,8 @@ void mw_renderer_render_texture_at(struct mw_renderer *renderer,
                                    pixman_region32_t *damage,
                                    struct wlr_surface* surface,
                                    struct wlr_texture *texture,
-                                   struct wlr_box *box, double opacity
+                                   struct wlr_box *box, double opacity,
+                                   float corner_radius
                                    ){
   struct wlr_fbox fbox;
   fbox.x = 0;
@@ -270,7 +273,7 @@ void mw_renderer_render_texture_at(struct mw_renderer *renderer,
                                 &fbox,
                                 (float)opacity,
                                 damage,
-                                box);
+                                box, corner_radius);
 
   /* 
   float alpha = (float)opacity;

@@ -704,7 +704,8 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
     pixman_region32_t damage;
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
-    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0);
+
+    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0, 0.0f);
     pixman_region32_fini(&damage);
   }
 }
@@ -727,7 +728,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
     pixman_region32_t damage;
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
-    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0);
+    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0, 10.0f); // corner_radius here
     pixman_region32_fini(&damage);
   }
 
@@ -1363,13 +1364,13 @@ void cursorbutton(struct wl_listener *listener, void *data){
 
     keyboard = wlr_seat_get_keyboard(seat);
     mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
-    wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
     for(b = buttons; b < END(buttons); b++){
       if(CLEANMASK(mods) == CLEANMASK(b->mod) && event->button == b->button && b->func){
         b->func(&b->arg);
         return;
       }
     }
+    wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
     return;
   }
   case WL_POINTER_BUTTON_STATE_RELEASED:

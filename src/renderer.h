@@ -28,44 +28,119 @@ static const GLchar texture_vertex_src[] =
 
 static const GLchar texture_fragment_rgba[] =
 "precision mediump float;\n"
+"varying vec2 v_texcoord;\n"
 "uniform sampler2D tex;\n"
 "uniform float alpha;\n"
 "uniform float width;\n"
 "uniform float height;\n"
-"varying vec2 v_texcoord;\n"
+"uniform float offset_x;\n"
+"uniform float offset_y;\n"
+"uniform float scale_x;\n"
+"uniform float scale_y;\n"
+"uniform float corner_radius;\n"
 "void main() {\n"
-"  vec4 color = texture2D(tex, v_texcoord);\n"
-"  color.rgb = mix(color.rgb, vec3(0.0, 0.0, 0.0), 0.0);\n"
-"  gl_FragColor = color * alpha;\n"
-"}\n";
+"  float x = (v_texcoord.x - offset_x)*scale_x;\n"
+"  float y = (v_texcoord.y - offset_y)*scale_y;\n"
+"  if(x < corner_radius && y < corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(corner_radius, corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x > width - corner_radius && y < corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(width - corner_radius, corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x < corner_radius && y > height - corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(corner_radius, height - corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x > width - corner_radius && y > height - corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(width - corner_radius, height - corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+" gl_FragColor = texture2D(tex, v_texcoord) * alpha;\n"
+"};\n";
 
 static const GLchar texture_fragment_rgbx[] =
 "precision mediump float;\n"
+"varying vec2 v_texcoord;\n"
 "uniform sampler2D tex;\n"
 "uniform float alpha;\n"
 "uniform float width;\n"
 "uniform float height;\n"
-"varying vec2 v_texcoord;\n"
+"uniform float offset_x;\n"
+"uniform float offset_y;\n"
+"uniform float scale_x;\n"
+"uniform float scale_y;\n"
+"uniform float corner_radius;\n"
 "void main() {\n"
-"    vec4 color = texture2D(tex, v_texcoord);\n"
-"    color.a = 1.0;\n"
-"    color.rgb = mix(color.rgb, vec3(0.0, 0.0, 0.0), 0.0);\n"
-"    gl_FragColor = color * alpha;\n"
-"}\n";
+"  float x = (v_texcoord.x - offset_x)*scale_x;\n"
+"  float y = (v_texcoord.y - offset_y)*scale_y;\n"
+"  if(x < corner_radius && y < corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(corner_radius, corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x > width - corner_radius && y < corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(width - corner_radius, corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x < corner_radius && y > height - corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(corner_radius, height - corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x > width - corner_radius && y > height - corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(width - corner_radius, height - corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+" gl_FragColor = texture2D(tex, v_texcoord) * alpha;\n"
+"};\n";
+
 
 static const GLchar texture_fragment_ext[] =
 "#extension GL_OES_EGL_image_external : require\n"
 "precision mediump float;\n"
-"uniform samplerExternalOES tex;\n"
+"varying vec2 v_texcoord;\n"
+"uniform samplerExternalOES texture0;\n"
 "uniform float alpha;\n"
 "uniform float width;\n"
 "uniform float height;\n"
-"varying vec2 v_texcoord;\n"
+"uniform float offset_x;\n"
+"uniform float offset_y;\n"
+"uniform float scale_x;\n"
+"uniform float scale_y;\n"
+"uniform float corner_radius;\n"
 "void main() {\n"
-"    vec4 color = texture2D(tex, v_texcoord);\n"
-"    color.rgb = mix(color.rgb, vec3(0.0, 0.0, 0.0), 0.0);\n"
-"    gl_FragColor = color * alpha;\n"
-"}\n";
+"  float x = (v_texcoord.x - offset_x)*scale_x;\n"
+"  float y = (v_texcoord.y - offset_y)*scale_y;\n"
+"  if(x < corner_radius && y < corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(corner_radius, corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x > width - corner_radius && y < corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(width - corner_radius, corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x < corner_radius && y > height - corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(corner_radius, height - corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+"  if(x > width - corner_radius && y > height - corner_radius){\n"
+"    if(length(vec2(x,y) - vec2(width - corner_radius, height - corner_radius)) > corner_radius){\n"
+"      discard;\n"
+"    }\n"
+"  }\n"
+" gl_FragColor = texture2D(texture0, v_texcoord) * alpha;\n"
+"};\n";
 
 struct quad_shader{
   GLuint shader;
@@ -89,6 +164,7 @@ struct mw_renderer_texture_shader{
   GLint scale_y;
   GLint width;
   GLint height;
+  GLint corner_radius;
 
 };
 
@@ -135,7 +211,8 @@ void mw_renderer_render_texture_at(struct mw_renderer *renderer,
                                    pixman_region32_t *damage,
                                    struct wlr_surface* surface,
                                    struct wlr_texture *texture,
-                                   struct wlr_box *box, double opacity
+                                   struct wlr_box *box, double opacity,
+                                   float corner_radius
                                    );
 
 static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
@@ -144,9 +221,9 @@ static bool mw_renderer_render_subtexture(struct mw_renderer *renderer,
                                    float alpha,
                                    pixman_region32_t *damage,
                                    /*const struct wlr_box *src_box,*/
-                                   const struct wlr_box *display_box
+                                   const struct wlr_box *display_box,
                                    /*float alpha        */
-                                   /*float corner_radius*/);
+                                   float corner_radius);
 
 
 void mw_renderer_init(struct mw_renderer *renderer, struct Server *server);

@@ -251,6 +251,9 @@ static void togglefullscreen(const Arg *arg);
 static void cyclefocus(const Arg *arg);
 static void changedesktop(const Arg *arg);
 static void exitwm(const Arg *arg);
+static void togglezoom(const Arg *arg);
+static void zoomin(const Arg *arg);
+static void zoomout(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -368,6 +371,22 @@ void exitwm(const Arg *arg){
   quit();
 }
 
+void togglezoom(const Arg *arg){
+  if(current_monitor->zoom_level != 1.0f){
+    current_monitor->zoom_level  = 1.0f;
+  }
+}
+
+// TODO ZOOMMIN, ZOOMMAX
+void zoomin(const Arg *arg){
+  current_monitor->zoom_level = current_monitor->zoom_level * zoom_step;
+}
+
+void zoomout(const Arg *arg){
+  (void)arg;
+  current_monitor->zoom_level = current_monitor->zoom_level / zoom_step;
+}
+
 void spawn(const Arg *arg){
 	if (fork() == 0) {
 		dup2(STDERR_FILENO, STDOUT_FILENO);
@@ -466,6 +485,18 @@ void arrangelayer(struct Monitor *mon, struct wl_list *list, struct wlr_box *usa
     wlr_scene_layer_surface_v1_configure(layer->scene_layer_surface, &full_area, usable_area);
 		wlr_scene_node_set_position(&layer->popups->node, layer->scene_tree->node.x, layer->scene_tree->node.y);
   }
+}
+
+// TODO maybe move to renderer.c?
+void zoom_transform_box(struct wlr_box *box, float cx, float cy){
+  if(current_monitor->zoom_level == 1.0f){
+    return;
+  }
+
+  //box->x;// math with canvases.... TODO
+  //box->y;// math with canvases .......... TODO
+  box->width = (int)roundf(box->width  * current_monitor->zoom_level);
+  box->height = (int)roundf(box->height * current_monitor->zoom_level);
 }
 
 void outputmanagerapply(struct wl_listener *listener, void *data){
@@ -711,6 +742,9 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
 }
 
 void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
+  float cursor_x = (float)(cursor->x - mon->m.x);
+  float cursor_y = (float)(cursor->y - mon->m.y);
+
   struct wlr_subsurface *subsurface;
   wl_list_for_each(subsurface, &surface->current.subsurfaces_below, current.link){
     rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
@@ -724,6 +758,8 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
       .width = surface->current.width,
       .height = surface->current.height,
     };
+
+    zoom_transform_box(&box, cursor_x, cursor_y);
 
     pixman_region32_t damage;
     pixman_region32_init(&damage);
@@ -895,6 +931,7 @@ void createmon(struct wl_listener *listener, void *data){
   mon->m.x = -1;
   mon->m.y = -1;
   mon->asleep = 0;
+  mon->zoom_level = 1.0f;
 
   mw_renderer_init_output(server->mw_renderer, mon);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
@@ -1186,12 +1223,12 @@ struct Client *clientat(double x, double y){// not the best solution but i give 
     int cw;
     int ch;
     if(client_is_x11(client)){
-      cw = client->surface.xwayland->width;
-      ch = client->surface.xwayland->height;
+      cw = client->surface.xwayland->width * current_monitor->zoom_level;
+      ch = client->surface.xwayland->height * current_monitor->zoom_level;
     }
     else{
-      cw = client->surface.xdg->current.geometry.width;
-      ch = client->surface.xdg->current.geometry.height;
+      cw = client->surface.xdg->current.geometry.width * current_monitor->zoom_level;
+      ch = client->surface.xdg->current.geometry.height * current_monitor->zoom_level;
     }    
 
     if(x >= cx && x < cx + cw && y >= cy && y < cy + ch){
@@ -1307,6 +1344,7 @@ void cursormotionabsolute(struct wl_listener *listener, void *data){
 }
 
 void cursoraxis(struct wl_listener *listener, void *data){
+  // TODO zooming via scrolling could be nice
   struct wlr_pointer_axis_event *event = data;
   wlr_seat_pointer_notify_axis(seat, event->time_msec, event->orientation, event->delta, event->delta_discrete,
                                event->source, event->relative_direction);

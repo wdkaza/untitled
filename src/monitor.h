@@ -23,6 +23,7 @@ struct Monitor{
   // uint32_t nmaster;
 
   bool asleep;
+  float zoom_level;
 
   struct wl_listener frame;
   struct wl_listener request_state;

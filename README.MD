@@ -53,8 +53,12 @@ This is the list of all the features available in the compositor, also serves as
 - [x] Bars support (only tested with wmenu so far)
 - [x] Xwayland support
 - [x] Layers support
-- [ ] Zooming
-- [ ] Damage for the renderer
+- [x] Zooming
+- [ ] Cavnas
+- [ ] Desktops
+- [ ] Keybind to switch focus between windows
+- [ ] Window borders
+- [ ] Damage for the renderer(no idea how to do)
 
 ......... and more to come, i will expand this list with time
 
@@ -66,3 +70,5 @@ also to not have it too long i just remove the bugs i fix from the list instead 
 - [ ] popups are broken, they just dont behave sometimes
 - [ ] mon-rules scale is broken, cant scale your monitor
 - [ ] having 2 monitors in the config, and only 1 plugged it would still allow the windows to be on the second monitor(maybe not so much of a bug)
+- [ ] if you spawn a nested compositor you cant move it, probably due to input masking or whatever it was called but who knows why, will test later
+- [ ] resizing while unzoomed is a bit broken, will fix in a few hours, after this commit

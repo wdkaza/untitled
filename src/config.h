@@ -80,9 +80,10 @@ static const Key keys[] = {
   {MODKEY,                    XKB_KEY_minus,       zoomout,          {}},
 };
 
+// do not set CursorPan to middle button, for some weird reason it just wont work, middle button doesnt work the same as left/right button
 static const Button buttons[] = {
-  {MODKEY, BTN_LEFT, moveresize, {.ui = CursorMove}},
-  //{MODKEY, BTN_MIDDLE, ... , ...},
-  {MODKEY, BTN_RIGHT, moveresize, {.ui = CursorResize}},
+  {MODKEY,            BTN_LEFT,  moveresize, {.ui = CursorMove}},
+  {WLR_MODIFIER_LOGO, BTN_LEFT,  moveresize, {.ui = CursorPan}},
+  {MODKEY,            BTN_RIGHT, moveresize, {.ui = CursorResize}},
 };
 

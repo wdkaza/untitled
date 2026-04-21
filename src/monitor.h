@@ -16,7 +16,7 @@ struct Monitor{
   struct wlr_box m; // monitor area
   struct wlr_box w; // windows area
   
-  int canvas_x, canvas_y;
+  double canvas_x, canvas_y;
 
   // TODO : per monitor specs
   // Layout layout; 

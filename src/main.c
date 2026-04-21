@@ -80,7 +80,7 @@
 #define LENGTH(X)               (sizeof X / sizeof X[0])
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = calloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
-enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize};
+enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize, CursorPan};
 enum { XDGShell, LayerShell, X11 };
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock, NUM_LAYERS };
 
@@ -255,6 +255,7 @@ static void togglezoom(const Arg *arg);
 static void zoomin(const Arg *arg);
 static void zoomout(const Arg *arg);
 static void cursormove();
+static void cursorpan();
 static void cursorresize();
 static void init();
 static void run();
@@ -726,8 +727,8 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
     if(!texture) continue;
 
     struct wlr_box box = {
-      .x = layer->scene_tree->node.x - mon->m.x,
-      .y = layer->scene_tree->node.y - mon->m.y,
+      .x = layer->scene_tree->node.x - mon->m.x + mon->canvas_x,// TODO , remove the canvas addition, did it as a test
+      .y = layer->scene_tree->node.y - mon->m.y + mon->canvas_y,
       .width = surface->current.width,
       .height = surface->current.height
     };
@@ -933,6 +934,9 @@ void createmon(struct wl_listener *listener, void *data){
   mon->asleep = 0;
   mon->zoom_level = 1.0f;
 
+  mon->canvas_x = 0;
+  mon->canvas_y = 0;
+
   mw_renderer_init_output(server->mw_renderer, mon);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 
@@ -1064,7 +1068,7 @@ void keyboardkey(struct wl_listener *listener, void *data){
   int nsyms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
   bool handled = false;
   uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
-  if((modifiers & WLR_MODIFIER_ALT) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED){
+  if((modifiers & MODKEY) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED){
     for(int i = 0; i < nsyms; i++){
       handled = keybinding(modifiers, syms[i]);
     }
@@ -1166,6 +1170,15 @@ void createinput(struct wl_listener *listener, void *data){
 	wlr_seat_set_capabilities(seat, caps);
 }
 
+void cursorpan(){
+  double dx = (grab_x - cursor->x) / current_monitor->zoom_level;
+  double dy = (grab_y - cursor->y) / current_monitor->zoom_level;
+  current_monitor->canvas_x += dx;
+  current_monitor->canvas_y += dy;
+  grab_x = cursor->x;
+  grab_y = cursor->y;
+}
+
 void cursormove(){
   if(gclient == NULL) return;
   struct Client *client = gclient; 
@@ -1252,6 +1265,7 @@ void processcursormotion(uint32_t time){
     }
   }
 
+
   if(cursor_mode == CursorMove){
     cursormove();
     return;
@@ -1260,6 +1274,11 @@ void processcursormotion(uint32_t time){
     cursorresize();
     return;
   }
+  if(cursor_mode == CursorPan){
+    cursorpan();
+    return; 
+  }
+
 
   struct Client *client = clientat(cursor->x, cursor->y);
   if(!client){
@@ -1354,7 +1373,21 @@ void cursorframe(struct wl_listener *listener, void *data){
   wlr_seat_pointer_notify_frame(seat);
 }
 
+void screentocanvas(double cursor_x, double cursor_y, double *can_x, double *can_y){
+  *can_x = ((cursor_x - current_monitor->m.x) / current_monitor->zoom_level) + current_monitor->canvas_x + current_monitor->m.x;
+  *can_y = ((cursor_y - current_monitor->m.y) / current_monitor->zoom_level) + current_monitor->canvas_y + current_monitor->m.y;
+}
+
 void moveresize(const Arg *arg){
+  // checking for cursorpan first because canvas doesnt need a client, and otherwise it 
+  // return early, TODO this looks so dumb, try to move it to the switch statement
+  if(arg->ui == CursorPan){
+    cursor_mode = CursorPan;
+    grab_x = cursor->x;
+    grab_y = cursor->y;
+    return;
+  }
+
   struct Client *client = clientat(cursor->x, cursor->y);
   if(!client || client->isfullscreen){
       cursor_mode = CursorPassthrough;
@@ -1383,8 +1416,10 @@ void moveresize(const Arg *arg){
       cursor_mode = CursorResize;
       setfocus(client);
       gclient = client;
-      grab_x = cursor->x - client->scene_tree->node.x;
-      grab_y = cursor->y - client->scene_tree->node.y;
+      double can_x, can_y;
+      screentocanvas(cursor->x, cursor->y, &can_x, &can_y);
+      grab_x = can_x - client->scene_tree->node.x;
+      grab_y = can_y - client->scene_tree->node.y;
       client->isfloating = true;
       return; 
   }

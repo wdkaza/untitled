@@ -59,6 +59,8 @@ This is the list of all the features available in the compositor, also serves as
 - [ ] Keybind to switch focus between windows
 - [ ] Window borders
 - [ ] Damage for the renderer(no idea how to do)
+- [ ] Renderer fallback to wlroots renderer
+- [ ] Testing if turning off Xwayland wont load x11 code upon compiling
 
 ......... and more to come, i will expand this list with time
 
@@ -73,3 +75,4 @@ also to not have it too long i just remove the bugs i fix from the list instead 
 - [ ] if you spawn a nested compositor you cant move it, probably due to input masking or whatever it was called but who knows why, will test later
 - [ ] dnd(drag&drop) image is gone, doesnt render
 - [ ] while unzoomed/zoomed popups spawn in wrong positions
+- [ ] canvas needs a lot of testing, currently moves the wallpaper around instead of windows, its intentional, lol, still a bug

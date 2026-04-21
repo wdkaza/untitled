@@ -747,7 +747,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
 
   struct wlr_subsurface *subsurface;
   wl_list_for_each(subsurface, &surface->current.subsurfaces_below, current.link){
-    rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
+    rendersurface(renderer, mon, subsurface->surface, sx + (int)roundf(subsurface->current.x * mon->zoom_level),sy + (int)roundf(subsurface->current.y * mon->zoom_level));
   }
 
   struct wlr_texture *texture = wlr_surface_get_texture(surface);
@@ -769,7 +769,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
   }
 
   wl_list_for_each(subsurface, &surface->current.subsurfaces_above, current.link){
-    rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
+    rendersurface(renderer, mon, subsurface->surface, sx + (int)roundf(subsurface->current.x * mon->zoom_level), sy + (int)roundf(subsurface->current.y * mon->zoom_level));
   }
 }
 
@@ -784,8 +784,8 @@ void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_
     if(!popup->base->surface->mapped) continue;
 
     struct wlr_box geo = popup->current.geometry;
-    int popup_sx = sx + xdg->current.geometry.x + popup->current.geometry.x - popup->base->current.geometry.x;
-    int popup_sy = sy + xdg->current.geometry.y + popup->current.geometry.y - popup->base->current.geometry.y;
+    int popup_sx = sx + (int)roundf((xdg->current.geometry.x + popup->current.geometry.x - popup->base->current.geometry.x) * mon->zoom_level);
+    int popup_sy = sy + (int)roundf((xdg->current.geometry.y + popup->current.geometry.y - popup->base->current.geometry.y) * mon->zoom_level);
     rendersurface(renderer, mon, popup->base->surface, popup_sx, popup_sy);
 
     renderpopups(renderer, mon, popup->base, popup_sx, popup_sy);
@@ -828,8 +828,8 @@ void rendermon(struct wl_listener *listener, void *data){
     int sy = client->scene_tree->node.y - mon->m.y;
 
     if(client->type == XDGShell){
-      sx -= client->surface.xdg->current.geometry.x;
-      sy -= client->surface.xdg->current.geometry.y;
+      sx -= (int)roundf(client->surface.xdg->current.geometry.x * mon->zoom_level);
+      sy -= (int)roundf(client->surface.xdg->current.geometry.y * mon->zoom_level);
     }
 
     rendersurface(server->mw_renderer, mon, surface, sx, sy);
@@ -1198,8 +1198,8 @@ void cursormove(){
 void cursorresize(){
   if(gclient == NULL) return;
   struct Client *client = gclient;
-  int new_width = cursor->x - client->scene_tree->node.x;
-  int new_height = cursor->y - client->scene_tree->node.y;
+  int new_width = (int)roundf((cursor->x - client->scene_tree->node.x) / client->mon->zoom_level);
+  int new_height = (int)roundf((cursor->y - client->scene_tree->node.y) / client->mon->zoom_level);
   if(new_width < 50 || new_height < 50) return;
 #ifdef XWAYLAND
   if(client->type == X11){
@@ -1280,12 +1280,12 @@ void processcursormotion(uint32_t time){
   int cy = client->scene_tree->node.y;
 
   if(client->type == XDGShell){
-    cx -= client->surface.xdg->current.geometry.x;
-    cy -= client->surface.xdg->current.geometry.y;
+    cx -= (int)roundf(client->surface.xdg->current.geometry.x * current_monitor->zoom_level);
+    cy -= (int)roundf(client->surface.xdg->current.geometry.y * current_monitor->zoom_level);
   }
 
-  double lx = cursor->x - cx;
-  double ly = cursor->y - cy;
+  double lx = roundf((cursor->x - cx) / current_monitor->zoom_level);
+  double ly = roundf((cursor->y - cy) / current_monitor->zoom_level);
 
   struct wlr_surface *subsurface = NULL;
   double sub_sx;

@@ -1,4 +1,4 @@
-# untitled (alpha 0.0.0)
+# untitled (alpha 0.0.1)
 A minimal wayland compositor, insipired heavily by dwl and its forks like mangowc, and newm, hevel
 
 Why "untitled"? i havent decided on the name yet for this project, im still not sure what to name it
@@ -71,4 +71,5 @@ also to not have it too long i just remove the bugs i fix from the list instead 
 - [ ] mon-rules scale is broken, cant scale your monitor
 - [ ] having 2 monitors in the config, and only 1 plugged it would still allow the windows to be on the second monitor(maybe not so much of a bug)
 - [ ] if you spawn a nested compositor you cant move it, probably due to input masking or whatever it was called but who knows why, will test later
-- [ ] resizing while unzoomed is a bit broken, will fix in a few hours, after this commit
+- [ ] dnd(drag&drop) image is gone, doesnt render
+- [ ] while unzoomed/zoomed popups spawn in wrong positions

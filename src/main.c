@@ -80,7 +80,7 @@
 #define LENGTH(X)               (sizeof X / sizeof X[0])
 #define LISTEN_STATIC(E, H)     do { struct wl_listener *_l = calloc(1, sizeof(*_l)); _l->notify = (H); wl_signal_add((E), _l); } while (0)
 
-enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize, CursorPan};
+enum CURSOR_MODE {CursorPassthrough, CursorMove, CursorResize};
 enum { XDGShell, LayerShell, X11 };
 enum { LyrBg, LyrBottom, LyrTile, LyrFloat, LyrTop, LyrFS, LyrOverlay, LyrBlock, NUM_LAYERS };
 
@@ -251,11 +251,7 @@ static void togglefullscreen(const Arg *arg);
 static void cyclefocus(const Arg *arg);
 static void changedesktop(const Arg *arg);
 static void exitwm(const Arg *arg);
-static void togglezoom(const Arg *arg);
-static void zoomin(const Arg *arg);
-static void zoomout(const Arg *arg);
 static void cursormove();
-static void cursorpan();
 static void cursorresize();
 static void init();
 static void run();
@@ -372,22 +368,6 @@ void exitwm(const Arg *arg){
   quit();
 }
 
-void togglezoom(const Arg *arg){
-  if(current_monitor->zoom_level != 1.0f){
-    current_monitor->zoom_level  = 1.0f;
-  }
-}
-
-// TODO ZOOMMIN, ZOOMMAX
-void zoomin(const Arg *arg){
-  current_monitor->zoom_level = current_monitor->zoom_level * zoom_step;
-}
-
-void zoomout(const Arg *arg){
-  (void)arg;
-  current_monitor->zoom_level = current_monitor->zoom_level / zoom_step;
-}
-
 void spawn(const Arg *arg){
 	if (fork() == 0) {
 		dup2(STDERR_FILENO, STDOUT_FILENO);
@@ -486,18 +466,6 @@ void arrangelayer(struct Monitor *mon, struct wl_list *list, struct wlr_box *usa
     wlr_scene_layer_surface_v1_configure(layer->scene_layer_surface, &full_area, usable_area);
 		wlr_scene_node_set_position(&layer->popups->node, layer->scene_tree->node.x, layer->scene_tree->node.y);
   }
-}
-
-// TODO maybe move to renderer.c?
-void zoom_transform_box(struct wlr_box *box, float cx, float cy){
-  if(current_monitor->zoom_level == 1.0f){
-    return;
-  }
-
-  //box->x;// math with canvases.... TODO
-  //box->y;// math with canvases .......... TODO
-  box->width = (int)roundf(box->width  * current_monitor->zoom_level);
-  box->height = (int)roundf(box->height * current_monitor->zoom_level);
 }
 
 void outputmanagerapply(struct wl_listener *listener, void *data){
@@ -727,8 +695,8 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
     if(!texture) continue;
 
     struct wlr_box box = {
-      .x = layer->scene_tree->node.x - mon->m.x + mon->canvas_x,// TODO , remove the canvas addition, did it as a test
-      .y = layer->scene_tree->node.y - mon->m.y + mon->canvas_y,
+      .x = layer->scene_tree->node.x - mon->m.x,
+      .y = layer->scene_tree->node.y - mon->m.y,
       .width = surface->current.width,
       .height = surface->current.height
     };
@@ -743,12 +711,9 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
 }
 
 void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
-  float cursor_x = (float)(cursor->x - mon->m.x);
-  float cursor_y = (float)(cursor->y - mon->m.y);
-
   struct wlr_subsurface *subsurface;
   wl_list_for_each(subsurface, &surface->current.subsurfaces_below, current.link){
-    rendersurface(renderer, mon, subsurface->surface, sx + (int)roundf(subsurface->current.x * mon->zoom_level),sy + (int)roundf(subsurface->current.y * mon->zoom_level));
+    rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
   }
 
   struct wlr_texture *texture = wlr_surface_get_texture(surface);
@@ -760,8 +725,6 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
       .height = surface->current.height,
     };
 
-    zoom_transform_box(&box, cursor_x, cursor_y);
-
     pixman_region32_t damage;
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
@@ -770,7 +733,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
   }
 
   wl_list_for_each(subsurface, &surface->current.subsurfaces_above, current.link){
-    rendersurface(renderer, mon, subsurface->surface, sx + (int)roundf(subsurface->current.x * mon->zoom_level), sy + (int)roundf(subsurface->current.y * mon->zoom_level));
+    rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
   }
 }
 
@@ -785,8 +748,8 @@ void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_
     if(!popup->base->surface->mapped) continue;
 
     struct wlr_box geo = popup->current.geometry;
-    int popup_sx = sx + (int)roundf((xdg->current.geometry.x + popup->current.geometry.x - popup->base->current.geometry.x) * mon->zoom_level);
-    int popup_sy = sy + (int)roundf((xdg->current.geometry.y + popup->current.geometry.y - popup->base->current.geometry.y) * mon->zoom_level);
+    int popup_sx = sx + xdg->current.geometry.x + popup->current.geometry.x - popup->base->current.geometry.x;
+    int popup_sy = sy + xdg->current.geometry.y + popup->current.geometry.y - popup->base->current.geometry.y;
     rendersurface(renderer, mon, popup->base->surface, popup_sx, popup_sy);
 
     renderpopups(renderer, mon, popup->base, popup_sx, popup_sy);
@@ -829,8 +792,8 @@ void rendermon(struct wl_listener *listener, void *data){
     int sy = client->scene_tree->node.y - mon->m.y;
 
     if(client->type == XDGShell){
-      sx -= (int)roundf(client->surface.xdg->current.geometry.x * mon->zoom_level);
-      sy -= (int)roundf(client->surface.xdg->current.geometry.y * mon->zoom_level);
+      sx -= client->surface.xdg->current.geometry.x;
+      sy -= client->surface.xdg->current.geometry.y;
     }
 
     rendersurface(server->mw_renderer, mon, surface, sx, sy);
@@ -932,10 +895,6 @@ void createmon(struct wl_listener *listener, void *data){
   mon->m.x = -1;
   mon->m.y = -1;
   mon->asleep = 0;
-  mon->zoom_level = 1.0f;
-
-  mon->canvas_x = 0;
-  mon->canvas_y = 0;
 
   mw_renderer_init_output(server->mw_renderer, mon);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
@@ -1170,15 +1129,6 @@ void createinput(struct wl_listener *listener, void *data){
 	wlr_seat_set_capabilities(seat, caps);
 }
 
-void cursorpan(){
-  double dx = (grab_x - cursor->x) / current_monitor->zoom_level;
-  double dy = (grab_y - cursor->y) / current_monitor->zoom_level;
-  current_monitor->canvas_x += dx;
-  current_monitor->canvas_y += dy;
-  grab_x = cursor->x;
-  grab_y = cursor->y;
-}
-
 void cursormove(){
   if(gclient == NULL) return;
   struct Client *client = gclient; 
@@ -1211,8 +1161,8 @@ void cursormove(){
 void cursorresize(){
   if(gclient == NULL) return;
   struct Client *client = gclient;
-  int new_width = (int)roundf((cursor->x - client->scene_tree->node.x) / client->mon->zoom_level);
-  int new_height = (int)roundf((cursor->y - client->scene_tree->node.y) / client->mon->zoom_level);
+  int new_width = cursor->x - client->scene_tree->node.x;
+  int new_height = cursor->y - client->scene_tree->node.y;
   if(new_width < 50 || new_height < 50) return;
 #ifdef XWAYLAND
   if(client->type == X11){
@@ -1225,7 +1175,7 @@ void cursorresize(){
   wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, new_width, new_height);
 }
 
-struct Client *clientat(double x, double y){// not the best solution but i give up thinking of something easy
+struct Client *clientat(double x, double y){
   struct Client *client;
   wl_list_for_each(client, &clients, link){
     struct wlr_surface *surface = client_surface(client);
@@ -1235,13 +1185,23 @@ struct Client *clientat(double x, double y){// not the best solution but i give 
     int cy = client->scene_tree->node.y;
     int cw;
     int ch;
-    if(client_is_x11(client)){
-      cw = client->surface.xwayland->width * current_monitor->zoom_level;
-      ch = client->surface.xwayland->height * current_monitor->zoom_level;
+    if(client->type == X11){
+      cw = client->surface.xwayland->width;
+      ch = client->surface.xwayland->height;
     }
     else{
-      cw = client->surface.xdg->current.geometry.width * current_monitor->zoom_level;
-      ch = client->surface.xdg->current.geometry.height * current_monitor->zoom_level;
+      struct wlr_box box;
+      if(client->surface.xdg->current.geometry.width > 0){
+          box = client->surface.xdg->current.geometry;
+      } 
+      else{
+          wlr_surface_get_extents(client->surface.xdg->surface, &box);
+      }
+      
+      cx -= box.x;
+      cy -= box.y;
+      cw = box.width;
+      ch = box.height;
     }    
 
     if(x >= cx && x < cx + cw && y >= cy && y < cy + ch){
@@ -1265,7 +1225,6 @@ void processcursormotion(uint32_t time){
     }
   }
 
-
   if(cursor_mode == CursorMove){
     cursormove();
     return;
@@ -1274,11 +1233,6 @@ void processcursormotion(uint32_t time){
     cursorresize();
     return;
   }
-  if(cursor_mode == CursorPan){
-    cursorpan();
-    return; 
-  }
-
 
   struct Client *client = clientat(cursor->x, cursor->y);
   if(!client){
@@ -1299,12 +1253,12 @@ void processcursormotion(uint32_t time){
   int cy = client->scene_tree->node.y;
 
   if(client->type == XDGShell){
-    cx -= (int)roundf(client->surface.xdg->current.geometry.x * current_monitor->zoom_level);
-    cy -= (int)roundf(client->surface.xdg->current.geometry.y * current_monitor->zoom_level);
+    cx -= client->surface.xdg->current.geometry.x;
+    cy -= client->surface.xdg->current.geometry.y;
   }
 
-  double lx = roundf((cursor->x - cx) / current_monitor->zoom_level);
-  double ly = roundf((cursor->y - cy) / current_monitor->zoom_level);
+  double lx = cursor->x - cx;
+  double ly = cursor->y - cy;
 
   struct wlr_surface *subsurface = NULL;
   double sub_sx;
@@ -1363,7 +1317,6 @@ void cursormotionabsolute(struct wl_listener *listener, void *data){
 }
 
 void cursoraxis(struct wl_listener *listener, void *data){
-  // TODO zooming via scrolling could be nice
   struct wlr_pointer_axis_event *event = data;
   wlr_seat_pointer_notify_axis(seat, event->time_msec, event->orientation, event->delta, event->delta_discrete,
                                event->source, event->relative_direction);
@@ -1373,21 +1326,7 @@ void cursorframe(struct wl_listener *listener, void *data){
   wlr_seat_pointer_notify_frame(seat);
 }
 
-void screentocanvas(double cursor_x, double cursor_y, double *can_x, double *can_y){
-  *can_x = ((cursor_x - current_monitor->m.x) / current_monitor->zoom_level) + current_monitor->canvas_x + current_monitor->m.x;
-  *can_y = ((cursor_y - current_monitor->m.y) / current_monitor->zoom_level) + current_monitor->canvas_y + current_monitor->m.y;
-}
-
 void moveresize(const Arg *arg){
-  // checking for cursorpan first because canvas doesnt need a client, and otherwise it 
-  // return early, TODO this looks so dumb, try to move it to the switch statement
-  if(arg->ui == CursorPan){
-    cursor_mode = CursorPan;
-    grab_x = cursor->x;
-    grab_y = cursor->y;
-    return;
-  }
-
   struct Client *client = clientat(cursor->x, cursor->y);
   if(!client || client->isfullscreen){
       cursor_mode = CursorPassthrough;
@@ -1416,10 +1355,8 @@ void moveresize(const Arg *arg){
       cursor_mode = CursorResize;
       setfocus(client);
       gclient = client;
-      double can_x, can_y;
-      screentocanvas(cursor->x, cursor->y, &can_x, &can_y);
-      grab_x = can_x - client->scene_tree->node.x;
-      grab_y = can_y - client->scene_tree->node.y;
+      grab_x = cursor->x - client->scene_tree->node.x;
+      grab_y = cursor->y - client->scene_tree->node.y;
       client->isfloating = true;
       return; 
   }

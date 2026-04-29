@@ -1,4 +1,4 @@
-# untitled (alpha 0.0.1)
+# untitled (alpha 0.0.2)
 A minimal wayland compositor, insipired heavily by dwl and its forks like mangowc, and newm, hevel
 
 Why "untitled"? i havent decided on the name yet for this project, im still not sure what to name it
@@ -53,14 +53,14 @@ This is the list of all the features available in the compositor, also serves as
 - [x] Bars support (only tested with wmenu so far)
 - [x] Xwayland support
 - [x] Layers support
-- [x] Zooming
-- [ ] Cavnas
 - [ ] Desktops
 - [ ] Keybind to switch focus between windows
 - [ ] Window borders
 - [ ] Damage for the renderer(no idea how to do)
 - [ ] Renderer fallback to wlroots renderer
 - [ ] Testing if turning off Xwayland wont load x11 code upon compiling
+- [ ] Zooming
+- [ ] Cavnas
 
 ......... and more to come, i will expand this list with time
 
@@ -74,5 +74,3 @@ also to not have it too long i just remove the bugs i fix from the list instead 
 - [ ] having 2 monitors in the config, and only 1 plugged it would still allow the windows to be on the second monitor(maybe not so much of a bug)
 - [ ] if you spawn a nested compositor you cant move it, probably due to input masking or whatever it was called but who knows why, will test later
 - [ ] dnd(drag&drop) image is gone, doesnt render
-- [ ] while unzoomed/zoomed popups spawn in wrong positions
-- [ ] canvas needs a lot of testing, currently moves the wallpaper around instead of windows, its intentional, lol, still a bug

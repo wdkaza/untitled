@@ -17,13 +17,6 @@ static const MonitorRule monrules[] = {
   {NULL,   1,0,1080, WL_OUTPUT_TRANSFORM_NORMAL},
 };
 
-
-// zooooooooooooooooooooooooooooooooooooooooommmmmmm
-// would be so cool if ill put it in monrules later
-static const float zoom_step = 1.25f;
-//static const float zoom_min = 0.0f;
-//static const float zoom_max = 10.0f;
-
 /* Trackpad */
 static const int tap_to_click = 1;
 static const int tap_and_drag = 1;
@@ -75,15 +68,14 @@ static const Key keys[] = {
   {MODKEY,                    XKB_KEY_w,           cyclefocus,       {}},
   {MODKEY,                    XKB_KEY_r,           togglefullscreen, {}},
   {MODKEY,                    XKB_KEY_q,           killclient,       {}},
-  {MODKEY,                    XKB_KEY_z,           togglezoom,       {}},
-  {MODKEY,                    XKB_KEY_equal,       zoomin,           {}},
-  {MODKEY,                    XKB_KEY_minus,       zoomout,          {}},
+  //{MODKEY,                    XKB_KEY_m,           changedesktop,    {.i = 1}},
+  //{MODKEY,                    XKB_KEY_z,           changedesktop,    {.i = 2}},
+  //{MODKEY,                    XKB_KEY_3,           changedesktop,    {.i = 3}},
 };
 
-// do not set CursorPan to middle button, for some weird reason it just wont work, middle button doesnt work the same as left/right button
 static const Button buttons[] = {
-  {MODKEY,            BTN_LEFT,  moveresize, {.ui = CursorMove}},
-  {WLR_MODIFIER_LOGO, BTN_LEFT,  moveresize, {.ui = CursorPan}},
-  {MODKEY,            BTN_RIGHT, moveresize, {.ui = CursorResize}},
+  {MODKEY, BTN_LEFT, moveresize, {.ui = CursorMove}},
+  //{MODKEY, BTN_MIDDLE, ... , ...},
+  {MODKEY, BTN_RIGHT, moveresize, {.ui = CursorResize}},
 };
 

@@ -8,7 +8,8 @@ At the time of writting, the functionallity of the wm is just moving/resizing th
 Thats because pre-alpha focused on making the window manager support as many essential things for a window manager to even work, and support most window types
 
 The structure is very similar to dwl, in some parts its juts dwl code, although its not a direct fork of dwl, why rewrite most functions(like some protocols),
-when they are already done in the best way possible, also i just really like dwl's code structure, its easy to work with
+when they are already done in the best way possible, also i just really like dwl's code structure, its easy to work with<br>
+its just suckless code is really suckless
 
 # Whats to come in the alpha
 
@@ -53,12 +54,14 @@ This is the list of all the features available in the compositor, also serves as
 - [x] Bars support (only tested with wmenu so far)
 - [x] Xwayland support
 - [x] Layers support
+- [ ] Window borders
 - [ ] Desktops
-- [ ] Keybind to switch focus between windows
+- [x] Keybind to switch focus between windows
 - [ ] Window borders
 - [ ] Damage for the renderer(no idea how to do)
-- [ ] Renderer fallback to wlroots renderer
+- [ ] Renderer fallback to wlroots renderer, if fail
 - [ ] Testing if turning off Xwayland wont load x11 code upon compiling
+- [ ] remaking makefile so someone could actually run this in the future
 - [ ] Zooming
 - [ ] Cavnas
 

@@ -347,6 +347,7 @@ static struct Client *focused_client; // dont know if i should keep it,
 #include "server.h"
 #include "renderer.h"
 #include "config.h"
+#include "confignew.h"
 #include "client.h"
 void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
@@ -1675,6 +1676,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
   const Button *b;
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:{
+    cfgprintf(config); // temp
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
     uint32_t mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 

@@ -1,5 +1,6 @@
 .cache
 main.o
 src/renderer.o
+src/confignew.o
 compile_commands.json
 main

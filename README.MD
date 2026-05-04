@@ -1,4 +1,4 @@
-# untitled (alpha 0.0.2)
+# untitled (alpha 0.0.4)
 A minimal wayland compositor, insipired heavily by dwl and its forks like mangowc, and newm, hevel
 
 Why "untitled"? i havent decided on the name yet for this project, im still not sure what to name it

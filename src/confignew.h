@@ -54,11 +54,29 @@ typedef struct{
   // window eye candy
   uint32_t border_size;
   uint32_t border_radius;
+  float focuscolor[4];
+  float unfocusedcolor[4];
+  float fullscreencolor[4];
 } Config;
 
 typedef void (*FuncType)(const Arg *);
 Config config;
 
+void cfghextorgba(float *color, uint32_t hex){
+  color[0] = ((hex >> 24) & 0xFF) / 255.0f;
+  color[1] = ((hex >> 16) & 0xFF) / 255.0f;
+  color[2] = ((hex >> 8) & 0xFF) / 255.0f;
+  color[3] = (hex & 0xFF) / 255.0f;
+}
+
+uint32_t cfgparsecolor(char *hex_str){
+  char *end;
+  uint32_t hex = strtol(hex_str, &end, 16);
+  if(*end != '\0'){
+    return -1;
+  }
+  return hex;
+}
 
 uint32_t cfgparsebutton(char *button_str){
   uint32_t button = 0;
@@ -216,22 +234,81 @@ void cfgparseoption(Config *config, char *key, char *value){
     config->middle_button_emulation = atoi(value);
   }
   else if(strcmp(key, "scroll_method") == 0){
-    config->scroll_method = atoi(value);
+    if(strcmp(value, "LIBINPUT_CONFIG_SCROLL_2FG") == 0){
+      config->scroll_method = LIBINPUT_CONFIG_SCROLL_2FG;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_SCROLL_EDGE") == 0){
+      config->scroll_method = LIBINPUT_CONFIG_SCROLL_EDGE;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN") == 0){
+      config->scroll_method = LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_SCROLL_NO_SCROLL") == 0){
+      config->scroll_method = LIBINPUT_CONFIG_SCROLL_NO_SCROLL;
+    }
   }
   else if(strcmp(key, "click_method") == 0){
-    config->click_method = atoi(value);
+    if(strcmp(value, "LIBINPUT_CONFIG_CLICK_METHOD_NONE") == 0){
+      config->click_method = LIBINPUT_CONFIG_CLICK_METHOD_NONE;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS") == 0){
+      config->click_method = LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER") == 0){
+      config->click_method = LIBINPUT_CONFIG_CLICK_METHOD_CLICKFINGER;
+    }
   }
   else if(strcmp(key, "send_events_mode") == 0){
-    config->send_events_mode = atoi(value);
+    if(strcmp(value, "LIBINPUT_CONFIG_SEND_EVENTS_ENABLED") == 0){
+      config->send_events_mode = LIBINPUT_CONFIG_SEND_EVENTS_ENABLED;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_SEND_EVENTS_DISABLED") == 0){
+      config->send_events_mode = LIBINPUT_CONFIG_SEND_EVENTS_DISABLED;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE") == 0){
+      config->send_events_mode = LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE;
+    }
   }
   else if(strcmp(key, "accel_profile") == 0){
-    config->accel_profile = atoi(value);
+    if(strcmp(value, "LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT") == 0){
+      config->accel_profile = LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT;
+    }
+    else if(strcmp(value, "LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE") == 0){
+      config->accel_profile = LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE;
+    }
   }
   else if(strcmp(key, "accel_speed") == 0){
     config->accel_speed = atoi(value);
   }
   else if(strcmp(key, "button_map") == 0){
     config->button_map = atoi(value);
+  }
+  else if(strcmp(key, "focuscolor") == 0){
+    uint32_t color = cfgparsecolor(value);
+    if(color == -1){
+      fprintf(stderr, "Invalid color format: %s\n", value);
+    }
+    else{
+      cfghextorgba(config->focuscolor, color);
+    }
+  }
+  else if(strcmp(key, "unfocusedcolor") == 0){
+    uint32_t color = cfgparsecolor(value);
+    if(color == -1){
+      fprintf(stderr, "Invalud color format: %s\n", value);
+    }
+    else{
+      cfghextorgba(config->unfocusedcolor, color);
+    }
+  }
+  else if(strcmp(key, "fullscreencolor") == 0){
+    uint32_t color = cfgparsecolor(value);
+    if(color == -1){
+      fprintf(stderr, "Invalud color format: %s\n", value);
+    }
+    else{
+      cfghextorgba(config->fullscreencolor, color);
+    }
   }
   else if(strncmp(key, "bind", 4) == 0){
     config->key_bindings = realloc(config->key_bindings, (config->key_bind_count + 1) * sizeof(KeyBinding));

@@ -1035,7 +1035,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
     pixman_region32_t damage;
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
-    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0, 10.0f); // corner_radius here
+    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0, config.border_radius); // corner_radius here
     pixman_region32_fini(&damage);
   }
 
@@ -1085,7 +1085,7 @@ void rendermon(struct wl_listener *listener, void *data){
     if(client->isfullscreen && client->mon == mon){
       struct wlr_render_rect_options background_rect = {
         .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
-        .color = {.r = fullscreen_bg[0], .g = fullscreen_bg[1], .b = fullscreen_bg[2], .a = fullscreen_bg[3]},
+        .color = {.r = config.fullscreencolor[0], .g = config.fullscreencolor[1], .b = config.fullscreencolor[2], .a = config.fullscreencolor[3]},
       };
       wlr_render_pass_add_rect(server->mw_renderer->pass, &background_rect);
     }
@@ -1364,7 +1364,7 @@ void createkeyboard(struct wlr_input_device *device){
   xkb_context_unref(context);
 
   
-  wlr_keyboard_set_repeat_info(wlr_keyboard, 35, 200);
+  wlr_keyboard_set_repeat_info(wlr_keyboard, config.repeat_rate, config.repeat_delay);
   keyboard->key.notify = keyboardkey;
   wl_signal_add(&wlr_keyboard->events.key, &keyboard->key);
   keyboard->modifier.notify = keyboardmodifiers;
@@ -1381,36 +1381,36 @@ void createpointer(struct wlr_pointer *pointer){
 			&& (device = wlr_libinput_get_device_handle(&pointer->base))){
 
 		if(libinput_device_config_tap_get_finger_count(device)){
-			libinput_device_config_tap_set_enabled(device, tap_to_click);
-			libinput_device_config_tap_set_drag_enabled(device, tap_and_drag);
-			libinput_device_config_tap_set_drag_lock_enabled(device, drag_lock);
-			libinput_device_config_tap_set_button_map(device, button_map);
+			libinput_device_config_tap_set_enabled(device, config.tap_to_click);
+			libinput_device_config_tap_set_drag_enabled(device, config.tap_and_drag);
+			libinput_device_config_tap_set_drag_lock_enabled(device, config.drag_lock);
+			libinput_device_config_tap_set_button_map(device, config.button_map);
 		}
 
 		if(libinput_device_config_scroll_has_natural_scroll(device))
-			libinput_device_config_scroll_set_natural_scroll_enabled(device, natural_scrolling);
+			libinput_device_config_scroll_set_natural_scroll_enabled(device, config.natural_scrolling);
 
 		if(libinput_device_config_dwt_is_available(device))
-			libinput_device_config_dwt_set_enabled(device, disable_while_typing);
+			libinput_device_config_dwt_set_enabled(device, config.disable_while_typing);
 
 		if(libinput_device_config_left_handed_is_available(device))
-			libinput_device_config_left_handed_set(device, left_handed);
+			libinput_device_config_left_handed_set(device, config.left_handed);
 
 		if(libinput_device_config_middle_emulation_is_available(device))
-			libinput_device_config_middle_emulation_set_enabled(device, middle_button_emulation);
+			libinput_device_config_middle_emulation_set_enabled(device, config.middle_button_emulation);
 
 		if(libinput_device_config_scroll_get_methods(device) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
-			libinput_device_config_scroll_set_method(device, scroll_method);
+			libinput_device_config_scroll_set_method(device, config.scroll_method);
 
 		if(libinput_device_config_click_get_methods(device) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
-			libinput_device_config_click_set_method(device, click_method);
+			libinput_device_config_click_set_method(device, config.click_method);
 
 		if(libinput_device_config_send_events_get_modes(device))
-			libinput_device_config_send_events_set_mode(device, send_events_mode);
+			libinput_device_config_send_events_set_mode(device, config.send_events_mode);
 
 		if(libinput_device_config_accel_is_available(device)){
-			libinput_device_config_accel_set_profile(device, accel_profile);
-			libinput_device_config_accel_set_speed(device, accel_speed);
+			libinput_device_config_accel_set_profile(device, config.accel_profile);
+			libinput_device_config_accel_set_speed(device, config.accel_speed);
 		}
 	}
 
@@ -1676,7 +1676,6 @@ void cursorbutton(struct wl_listener *listener, void *data){
   const Button *b;
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:{
-    cfgprintf(config); // temp
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
     uint32_t mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 
@@ -1791,7 +1790,7 @@ void mapnotify(struct wl_listener *listener, void *data){
   }
 
   for(int i = 0; i < 4; i++){
-    client->border[i] = wlr_scene_rect_create(client->scene_tree, 0, 0, focused_border_color);
+    client->border[i] = wlr_scene_rect_create(client->scene_tree, 0, 0, config.focuscolor);
     client->border[i]->node.data = client;
   }
 
@@ -2138,6 +2137,8 @@ void init(){
 	for(i = 0; i < (int)LENGTH(sig); i++){
 		sigaction(sig[i], &sa, NULL);
   }
+
+  cfgparsefile(&config, "/home/wdkaza/code/untitled/src/config.conf");// TODO! HARDCODED PATH
 
   wlr_log_init(WLR_DEBUG, NULL);  
   server->display = wl_display_create();

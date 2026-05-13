@@ -1307,13 +1307,12 @@ void urgent(struct wl_listener *listener, void *data){
 // from dwl
 bool keybinding(uint32_t mods, xkb_keysym_t sym)
 {
-	const Key *k;
-	for (k = keys; k < END(keys); k++) {
-		if (CLEANMASK(mods) == CLEANMASK(k->mod)
-				&& xkb_keysym_to_lower(sym) == xkb_keysym_to_lower(k->keysym)
-				&& k->func) {
-			k->func(&k->arg);
-			return 1;
+  for(uint32_t i = 0; i < config.key_bind_count; i++){
+    KeyBinding *k = &config.key_bindings[i];
+    if(CLEANMASK(mods) == CLEANMASK(k->mod) &&
+        xkb_keysym_to_lower(sym) == xkb_keysym_to_lower(k->keysym) && k->func){
+      k->func(&k->arg);
+      return 1;
 		}
 	}
 	return 0;
@@ -1334,11 +1333,11 @@ void keyboardkey(struct wl_listener *listener, void *data){
   int nsyms = xkb_state_key_get_syms(keyboard->wlr_keyboard->xkb_state, keycode, &syms);
   bool handled = false;
   uint32_t modifiers = wlr_keyboard_get_modifiers(keyboard->wlr_keyboard);
-  if((modifiers & MODKEY) && event->state == WL_KEYBOARD_KEY_STATE_PRESSED){
+  if(event->state == WL_KEYBOARD_KEY_STATE_PRESSED){
     for(int i = 0; i < nsyms; i++){
-      handled = keybinding(modifiers, syms[i]);
+      handled |= keybinding(modifiers, syms[i]);
     }
-  } 
+  }
   if(!handled){
     wlr_seat_set_keyboard(seat, keyboard->wlr_keyboard);
     wlr_seat_keyboard_notify_key(seat, event->time_msec, event->keycode, event->state);
@@ -1673,7 +1672,7 @@ void cursorbutton(struct wl_listener *listener, void *data){
   struct wlr_pointer_button_event *event = data;
   struct wlr_keyboard *keyboard;
   uint32_t mods;
-  const Button *b;
+
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:{
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
@@ -1681,12 +1680,14 @@ void cursorbutton(struct wl_listener *listener, void *data){
 
     keyboard = wlr_seat_get_keyboard(seat);
     mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
-    for(b = buttons; b < END(buttons); b++){
-      if(CLEANMASK(mods) == CLEANMASK(b->mod) && event->button == b->button && b->func){
-        b->func(&b->arg);
+    for(uint32_t i = 0;i < config.mouse_bind_count; i++){
+      MouseBinding *m = &config.mouse_bindings[i];
+      if(CLEANMASK(mods) == CLEANMASK(m->mod) && event->button == m->button && m->func){
+        m->func(&m->arg);
         return;
       }
     }
+
     wlr_seat_pointer_notify_button(seat, event->time_msec, event->button, event->state);
     return;
   }

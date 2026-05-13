@@ -181,8 +181,12 @@ FuncType cfgparsefunc(char *func_name, Arg *arg, char *arg_value){
 
   if(strcmp(func_name, "spawn") == 0){
     function = spawn;
+    char **argv = malloc(2 * sizeof(char *));
+    argv[0] = strdup(arg_value);
+    argv[1] = NULL;
+    (*arg).v = argv;
   }
-  else if(strcmp(func_name, "extiwm") == 0){
+  else if(strcmp(func_name, "exitwm") == 0){
     function = exitwm;
   }
   else if(strcmp(func_name, "focusdir") == 0){
@@ -371,6 +375,7 @@ void cfgparseline(Config *config, char *line){
   char value[256];
   if(sscanf(line, "%255[^=]=%255[^\n]", key, value) != 2){
     fprintf(stderr, "Failed to read line, line: %s\n", line);
+    return;
   } 
   cfgparseoption(config, key, value);
 }
@@ -385,7 +390,7 @@ void cfgparsefile(Config *config, const char *file_path){
   }
 
   char line[512];
-  uint32_t count;
+  uint32_t count = 0;
   while(fgets(line, sizeof(line), file)){
     count++;
     if(line[0] == '#' || line[0] == '\n'){

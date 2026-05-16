@@ -188,13 +188,6 @@ struct LayerSurface{
   struct wl_listener destroy;
 };
 
-typedef struct{
-  const char *name;
-  float scale;
-  int x, y;
-  enum wl_output_transform rotation;
-}MonitorRule;
-
 struct PointerConstraint{
   struct wlr_pointer_constraint_v1 *constraint;
   struct wl_listener destroy;
@@ -347,7 +340,7 @@ static struct Client *focused_client; // dont know if i should keep it,
 #include "server.h"
 #include "renderer.h"
 #include "config.h"
-#include "confignew.h"
+#include "config.h"
 #include "client.h"
 void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
@@ -378,7 +371,7 @@ void spawn(const Arg *arg){
 	if (fork() == 0) {
 		dup2(STDERR_FILENO, STDOUT_FILENO);
 		setsid();
-		execvp(((char **)arg->v)[0], (char **)arg->v);
+    execl("/bin/sh", "sh", "-c", ((char **)arg->v)[0], NULL);
     exit(1);
 	}
 }
@@ -1207,12 +1200,13 @@ void createmon(struct wl_listener *listener, void *data){
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 
   wlr_output_state_init(&state);
-  for(rule = monrules; rule < END(monrules); rule++){
+  for(int i = 0; i < config.mon_rule_count; i++){
+    MonitorRule *rule = &config.mon_rules[i];
     if(!rule->name || strstr(wlr_output->name, rule->name)){
-      mon->m.x = rule->x,
-      mon->m.y = rule->y,
+      mon->m.x = rule->x;
+      mon->m.y = rule->y;
       wlr_output_state_set_scale(&state, rule->scale);
-      wlr_output_state_set_transform(&state, rule->rotation);
+      wlr_output_state_set_transform(&state, rule->transform);
       break;
     }
   }
@@ -2139,7 +2133,10 @@ void init(){
 		sigaction(sig[i], &sa, NULL);
   }
 
+  cfgsetdefaultvalue(&config);
   cfgparsefile(&config, "/home/wdkaza/code/untitled/src/config.conf");// TODO! HARDCODED PATH
+  cfgrunexeconce(&config);
+  cfgrunexec(&config);
 
   wlr_log_init(WLR_DEBUG, NULL);  
   server->display = wl_display_create();

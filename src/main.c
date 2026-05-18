@@ -170,6 +170,13 @@ struct Keyboard{
   struct wl_listener destroy;
 };
 
+struct Pointer {
+  struct wl_list link;
+
+  struct wlr_input_device *device;
+  struct wl_listener destroy;
+};
+
 struct LayerSurface{
   unsigned int type;
   struct Monitor *mon;
@@ -238,6 +245,8 @@ static void cursorwarptohint(void);
 static void urgent(struct wl_listener *listener, void *data);
 static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
 static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
+static void removepointer(struct wl_listener *listener, void *data);
+static void configurepointer(struct wlr_input_device *device);
 struct Client *find_client_by_direction(struct Client *tc, const Arg *arg, bool findfloating, bool ignore_align);
 struct Client *direction_select(const Arg *arg);
 static void setfocus(struct Client *client);
@@ -249,6 +258,7 @@ static void cyclefocus(const Arg *arg);
 static void changedesktop(const Arg *arg);
 static void focusdir(const Arg *arg);
 static void exitwm(const Arg *arg);
+static void cfgreload(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -330,6 +340,7 @@ static int grab_x, grab_y;
 static struct wl_list mons;
 static struct wl_list clients;
 static struct wl_list keyboards;
+static struct wl_list pointers;
 
 static uint32_t current_desktop;
 struct Monitor *current_monitor;
@@ -339,7 +350,6 @@ static struct Client *focused_client; // dont know if i should keep it,
 
 #include "server.h"
 #include "renderer.h"
-#include "config.h"
 #include "config.h"
 #include "client.h"
 void cyclefocus(const Arg *arg){
@@ -1368,45 +1378,63 @@ void createkeyboard(struct wlr_input_device *device){
   wl_list_insert(&keyboards, &keyboard->link);
 }
 
-void createpointer(struct wlr_pointer *pointer){
-	struct libinput_device *device;
-	if (wlr_input_device_is_libinput(&pointer->base)
-			&& (device = wlr_libinput_get_device_handle(&pointer->base))){
+void configurepointer(struct wlr_input_device *device){
+  struct libinput_device *libinput_device;
+  if (wlr_input_device_is_libinput(device)
+    && (libinput_device = wlr_libinput_get_device_handle(device))){
 
-		if(libinput_device_config_tap_get_finger_count(device)){
-			libinput_device_config_tap_set_enabled(device, config.tap_to_click);
-			libinput_device_config_tap_set_drag_enabled(device, config.tap_and_drag);
-			libinput_device_config_tap_set_drag_lock_enabled(device, config.drag_lock);
-			libinput_device_config_tap_set_button_map(device, config.button_map);
+		if(libinput_device_config_tap_get_finger_count(libinput_device)){
+			libinput_device_config_tap_set_enabled(libinput_device, config.tap_to_click);
+			libinput_device_config_tap_set_drag_enabled(libinput_device, config.tap_and_drag);
+			libinput_device_config_tap_set_drag_lock_enabled(libinput_device, config.drag_lock);
+			libinput_device_config_tap_set_button_map(libinput_device, config.button_map);
 		}
 
-		if(libinput_device_config_scroll_has_natural_scroll(device))
-			libinput_device_config_scroll_set_natural_scroll_enabled(device, config.natural_scrolling);
+		if(libinput_device_config_scroll_has_natural_scroll(libinput_device))
+			libinput_device_config_scroll_set_natural_scroll_enabled(libinput_device, config.natural_scrolling);
 
-		if(libinput_device_config_dwt_is_available(device))
-			libinput_device_config_dwt_set_enabled(device, config.disable_while_typing);
+		if(libinput_device_config_dwt_is_available(libinput_device))
+			libinput_device_config_dwt_set_enabled(libinput_device, config.disable_while_typing);
 
-		if(libinput_device_config_left_handed_is_available(device))
-			libinput_device_config_left_handed_set(device, config.left_handed);
+		if(libinput_device_config_left_handed_is_available(libinput_device))
+			libinput_device_config_left_handed_set(libinput_device, config.left_handed);
 
-		if(libinput_device_config_middle_emulation_is_available(device))
-			libinput_device_config_middle_emulation_set_enabled(device, config.middle_button_emulation);
+		if(libinput_device_config_middle_emulation_is_available(libinput_device))
+			libinput_device_config_middle_emulation_set_enabled(libinput_device, config.middle_button_emulation);
 
-		if(libinput_device_config_scroll_get_methods(device) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
-			libinput_device_config_scroll_set_method(device, config.scroll_method);
+		if(libinput_device_config_scroll_get_methods(libinput_device) != LIBINPUT_CONFIG_SCROLL_NO_SCROLL)
+			libinput_device_config_scroll_set_method(libinput_device, config.scroll_method);
 
-		if(libinput_device_config_click_get_methods(device) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
-			libinput_device_config_click_set_method(device, config.click_method);
+		if(libinput_device_config_click_get_methods(libinput_device) != LIBINPUT_CONFIG_CLICK_METHOD_NONE)
+			libinput_device_config_click_set_method(libinput_device, config.click_method);
 
-		if(libinput_device_config_send_events_get_modes(device))
-			libinput_device_config_send_events_set_mode(device, config.send_events_mode);
+		if(libinput_device_config_send_events_get_modes(libinput_device))
+			libinput_device_config_send_events_set_mode(libinput_device, config.send_events_mode);
 
-		if(libinput_device_config_accel_is_available(device)){
-			libinput_device_config_accel_set_profile(device, config.accel_profile);
-			libinput_device_config_accel_set_speed(device, config.accel_speed);
+		if(libinput_device_config_accel_is_available(libinput_device)){
+			libinput_device_config_accel_set_profile(libinput_device, config.accel_profile);
+			libinput_device_config_accel_set_speed(libinput_device, config.accel_speed);
 		}
 	}
+}
 
+void removepointer(struct wl_listener *listener, void *data){
+  struct Pointer *pointer = wl_container_of(listener, pointer, destroy);
+  wl_list_remove(&pointer->link);
+  wl_list_remove(&pointer->destroy.link);
+  free(pointer);
+}
+
+void createpointer(struct wlr_pointer *pointer){
+  struct Pointer *point = calloc(1, sizeof(*point));
+  point->device = &pointer->base;
+
+  point->destroy.notify = removepointer;
+  wl_signal_add(&pointer->base.events.destroy, &point->destroy);
+
+  wl_list_insert(&pointers, &point->link);
+
+  configurepointer(&pointer->base);
   wlr_cursor_attach_input_device(cursor, &pointer->base);
 }
 
@@ -2203,6 +2231,7 @@ void init(){
 
 
   wl_list_init(&keyboards);
+  wl_list_init(&pointers);
   wl_signal_add(&server->wlr_backend->events.new_input, &new_input);
 
 

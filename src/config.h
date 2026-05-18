@@ -156,13 +156,13 @@ uint32_t cfgparsemod(char *mod_str){
     if(strstr(token, "super") || strstr(token, "logo") || strstr(token, "win")){
       mod |= WLR_MODIFIER_LOGO;
     }
-    if(strcmp(token, "ctrl") == 0){
+    else if(strcmp(token, "ctrl") == 0){
       mod |= WLR_MODIFIER_CTRL;
     }
-    if(strcmp(token, "shift") == 0){
+    else if(strcmp(token, "shift") == 0){
       mod |= WLR_MODIFIER_SHIFT;
     }
-    if(strcmp(token, "alt") == 0){
+    else if(strcmp(token, "alt") == 0){
       mod |= WLR_MODIFIER_ALT;
     }
     else{
@@ -279,6 +279,9 @@ FuncType cfgparsefunc(char *func_name, Arg *arg, char *arg_value){
   else if(strcmp(func_name, "moveresize") == 0){
     function = moveresize;
     (*arg).ui = cfgparsemouseaction(arg_value);
+  }
+  else if(strcmp(func_name, "cfgreload") == 0){
+    function = cfgreload; 
   }
   return function;
 }
@@ -592,4 +595,120 @@ void cfgsetdefaultvalue(Config *config){
   cfghextorgba(config->focuscolor,      0xFF0000FF);
   cfghextorgba(config->unfocusedcolor,  0x00FF00FF);
   cfghextorgba(config->fullscreencolor, 0x000000FF);
+}
+
+void cfgfree(){
+  if(config.key_bindings){
+    for(uint32_t i = 0; i < config.key_bind_count; i++){
+      if(config.key_bindings[i].func == spawn){
+        char **argv = (char **)config.key_bindings[i].arg.v;
+        if(argv){
+          free(argv[0]);
+          free(argv);
+          config.key_bindings[i].arg.v = NULL;
+        }
+      }
+    }
+    free(config.key_bindings);
+    config.key_bindings = NULL;
+    config.key_bind_count = 0;
+  }
+  if(config.mouse_bindings){
+    for(uint32_t i = 0; i < config.mouse_bind_count; i++){
+      if(config.mouse_bindings[i].func == spawn){
+        char **argv = (char **)config.mouse_bindings[i].arg.v;
+        if(argv){
+          free(argv[0]);
+          free(argv);
+          config.mouse_bindings[i].arg.v = NULL;
+        }
+      }
+    }
+    free(config.mouse_bindings);
+    config.mouse_bindings = NULL;
+    config.mouse_bind_count = 0;
+  }
+  if(config.mon_rules){
+    for(uint32_t i = 0; i < config.mon_rule_count; i++){
+      if(config.mon_rules[i].name){
+        free(config.mon_rules[i].name);
+      }
+    }
+    free(config.mon_rules);
+    config.mon_rules = NULL;
+    config.mon_rule_count = 0;
+  }
+  if(config.exec){
+    for(uint32_t i = 0; i < config.exec_count; i++){
+      free(config.exec[i]);
+    }
+    free(config.exec);
+    config.exec = NULL;
+    config.exec_count = 0;
+  }
+  if(config.exec_once){
+    for(uint32_t i = 0; i < config.exec_once_count; i++){
+      free(config.exec_once[i]);
+    }
+    free(config.exec_once);
+    config.exec_once = NULL;
+    config.exec_once_count = 0;
+  }
+}
+
+void cfgparse(){
+  cfgfree();
+  cfgsetdefaultvalue(&config);
+  cfgparsefile(&config, "/home/wdkaza/code/untitled/src/config.conf"); // TODO : HARDCODED PATH AGAIN
+}
+
+void cfgreloadkeyboard(){
+  struct Keyboard *kb;
+  wl_list_for_each(kb, &keyboards, link){
+    wlr_keyboard_set_repeat_info(kb->wlr_keyboard, config.repeat_rate, config.repeat_delay);
+  }
+}
+
+void cfgreloadpointer(){
+  struct Pointer *pointer;
+  wl_list_for_each(pointer, &pointers, link){
+    configurepointer(pointer->device);
+  }
+}
+
+void cfgreloadmonrules(){
+  struct Monitor *mon;
+  wl_list_for_each(mon, &mons, link){
+    for(uint32_t i = 0; i < config.mon_rule_count; i++){
+      MonitorRule *rule = &config.mon_rules[i];
+      if(!rule->name || strstr(mon->wlr_output->name, rule->name)){
+        struct wlr_output_state state;
+        wlr_output_state_init(&state);
+        wlr_output_state_set_scale(&state, rule->scale);
+        wlr_output_state_set_transform(&state, rule->transform);
+        wlr_output_commit_state(mon->wlr_output, &state);
+        wlr_output_state_finish(&state);
+
+        if(rule->x >= 0 && rule->y >= 0){
+          wlr_output_layout_add(output_layout, mon->wlr_output, rule->x, rule->y);
+          mon->m.x = rule->x;
+          mon->m.y = rule->y;
+          mon->w = mon->m;
+        }
+        break;
+      }
+    }
+  }
+}
+
+void cfgreloadeverything(){
+  cfgrunexec(&config);
+  cfgreloadpointer();
+  cfgreloadkeyboard();
+  cfgreloadmonrules();
+}
+
+void cfgreload(const Arg *arg){
+  cfgparse();
+  cfgreloadeverything();
 }

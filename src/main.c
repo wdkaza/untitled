@@ -1562,6 +1562,34 @@ void processcursormotion(uint32_t time){
     return;
   }
 
+  struct LayerSurface *layer;
+  double layer_sx;
+  double layer_sy;
+
+  int layer_order[] = {
+    ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY,
+    ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+    ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM,
+    ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND,
+  };
+
+  for(int i = 0; i < 4; i++){
+    wl_list_for_each(layer, &current_monitor->layers[layer_order[i]], link){
+      if(!layer->mapped){
+        continue;
+      }
+      double sx = cursor->x - layer->scene_tree->node.x;
+      double sy = cursor->y - layer->scene_tree->node.y;
+
+      struct wlr_surface *layer_surface_at = wlr_surface_surface_at(layer->layer_surface->surface, sx, sy, &layer_sx, &layer_sy);
+      if(layer_surface_at){
+        wlr_seat_pointer_notify_enter(seat, layer_surface_at, layer_sx, layer_sy);
+        wlr_seat_pointer_notify_motion(seat, time, layer_sx, layer_sy);
+        return;
+      }
+    }
+  }
+
   struct Client *client = clientat(cursor->x, cursor->y);
   if(!client){
     wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
@@ -1817,9 +1845,11 @@ void mapnotify(struct wl_listener *listener, void *data){
     client->border[i]->node.data = client;
   }
 
-  struct Client *window;
-  wl_list_for_each(window, &clients, link){
-    if(window->isfullscreen && window->mon == client->mon) setfullscreen(window, 0);
+  if(!client_is_unmanaged(client) && client->type != XDGShell){
+    struct Client *window;
+    wl_list_for_each(window, &clients, link){
+      if(window->isfullscreen && window->mon == client->mon) setfullscreen(window, 0);
+    }
   }
 
   wl_list_insert(&clients, &client->link);
@@ -2163,8 +2193,6 @@ void init(){
 
   cfgsetdefaultvalue(&config);
   cfgparsefile(&config, "/home/wdkaza/code/untitled/src/config.conf");// TODO! HARDCODED PATH
-  cfgrunexeconce(&config);
-  cfgrunexec(&config);
 
   wlr_log_init(WLR_DEBUG, NULL);  
   server->display = wl_display_create();
@@ -2206,6 +2234,7 @@ void init(){
   wlr_presentation_create(server->display, server->wlr_backend, 2);
   wlr_data_device_manager_create(server->display);
   wlr_primary_selection_v1_device_manager_create(server->display);
+  wlr_screencopy_manager_v1_create(server->display);
   wlr_data_control_manager_v1_create(server->display);
 
   output_layout = wlr_output_layout_create(server->display);
@@ -2279,6 +2308,9 @@ void init(){
   wl_list_init(&mons);
   server->new_output.notify = createmon;
   wl_signal_add(&server->wlr_backend->events.new_output, &server->new_output);
+
+  cfgrunexeconce(&config);
+  cfgrunexec(&config);
 
   // for xwayland
   unsetenv("DISPLAY");

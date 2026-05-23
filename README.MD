@@ -1,5 +1,5 @@
-# untitled (alpha 0.0.7)
-A minimal wayland compositor, insipired heavily by dwl and its forks like mangowc, and newm, hevel
+# untitled (alpha 0.0.8)
+A minimal wayland compositor, insipired heavily by dwl and its forks like mangowc
 
 Why "untitled"? i havent decided on the name yet for this project, im still not sure what to name it
 
@@ -73,8 +73,8 @@ This is more of a list to myself than to anyone else, just reminding myself what
 also to not have it too long i just remove the bugs i fix from the list instead of checking the box
 
 - [ ] popups are broken, they just dont behave sometimes
-- [x] hovering over a place that would spawm popups, unfullscreens the window
-- [x] selectiing area for a screenshot doesnt work
+- [x] dragging a dnd popup that cant go out of the window, is broken upon cursor reentering the window while holding it
+- [ ] launchers steal input and cant be refocused/closed if they were defocused by clicking on a window and etc
 - [ ] mon-rules scale is broken, cant scale your monitor
 - [ ] having 2 monitors in the config, and only 1 plugged it would still allow the windows to be on the second monitor(maybe not so much of a bug)
 - [ ] if you spawn a nested compositor you cant move it, probably due to input masking or whatever it was called but who knows why, will test later

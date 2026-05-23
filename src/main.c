@@ -226,6 +226,7 @@ static void requeststartdrag(struct wl_listener *listener, void *data);
 static void destroydragicon(struct wl_listener *listener, void *data);
 static void powermanagersetmode(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
+static void applyrule(struct Client *client);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
 static void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy);
@@ -246,6 +247,7 @@ static void urgent(struct wl_listener *listener, void *data);
 static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
 static void outputmanagerapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void removepointer(struct wl_listener *listener, void *data);
+static void resize(struct Client *client, struct wlr_box geo);
 static void configurepointer(struct wlr_input_device *device);
 struct Client *find_client_by_direction(struct Client *tc, const Arg *arg, bool findfloating, bool ignore_align);
 struct Client *direction_select(const Arg *arg);
@@ -259,6 +261,7 @@ static void changedesktop(const Arg *arg);
 static void focusdir(const Arg *arg);
 static void exitwm(const Arg *arg);
 static void cfgreload(const Arg *arg);
+static void chvt(const Arg *arg);
 static void cursormove();
 static void cursorresize();
 static void init();
@@ -342,6 +345,8 @@ static struct wl_list clients;
 static struct wl_list keyboards;
 static struct wl_list pointers;
 
+static struct wlr_session *session;
+
 static uint32_t current_desktop;
 struct Monitor *current_monitor;
 static struct Client *focused_client; // dont know if i should keep it, 
@@ -385,6 +390,12 @@ void spawn(const Arg *arg){
     exit(1);
 	}
 }
+
+void chvt(const Arg *arg){
+  struct timespec ts;
+  wlr_session_change_vt(session, arg->ui);
+}
+
 //
 void togglefullscreen(const Arg *arg){
   if(focused_client == NULL) return;
@@ -1069,6 +1080,7 @@ void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_
 void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
   if(mon->asleep) return;
+  if(session && !session->active) return;
 
   //glClearColor(0.0, 0.0, 0.0, 1.0);
   //glClear(GL_COLOR_BUFFER_BIT);
@@ -1307,6 +1319,89 @@ void urgent(struct wl_listener *listener, void *data){
 	client->isurgent = 1;
 }
 
+void sendtomon(struct Client *client, struct Monitor *mon){
+  if(!client) return;
+  if(!mon) return;
+  if(client->mon == mon) return;
+
+  client->mon = mon;
+  wlr_scene_node_set_position(&client->scene_tree->node, mon->m.x, mon->m.y);
+  client->geom.x = mon->m.x;
+  client->geom.y = mon->m.y;
+
+  if(client->isfullscreen){
+    resize(client, mon->m);
+  }
+}
+
+void applyrules(struct Client *client){
+  const char *appid, *title;
+  struct Monitor *m= NULL;
+  struct Monitor *mon = NULL;
+  struct Client *fc = NULL;
+  struct Client *parent = NULL;
+
+  if(!client) return;
+
+  parent = client_get_parent(client);
+  mon = parent && parent->mon ? parent->mon : current_monitor;
+  client->isfloating = client_is_float_type(client) || parent;
+
+#ifdef XWAYLAND
+  if(client->isfloating && client_is_x11(client)){
+    client->geom = client->geom;
+  }
+#endif
+
+  mon = parent && parent->mon ? parent->mon : current_monitor;
+  client->isfloating = client_is_float_type(client) || parent;
+  appid = client_get_appid(client);
+  title = client_get_title(client);
+
+
+  for(uint32_t i = 0; i < config.win_rule_count; i++){
+    WinRule *winrule = &config.win_rules[i];
+    
+    if((!winrule->title || strstr(title, winrule->title)) && (!winrule->appid || strstr(appid, winrule->appid))){
+
+      client->isfloating = winrule->floating;
+      client->isfullscreen = winrule->fullscreen;
+
+      wl_list_for_each(m, &mons, link){
+        if(winrule->monitor && strcmp(winrule->monitor, m->wlr_output->name) == 0){
+          mon = m;
+        }
+      }
+      if(winrule->width > 1){
+        client->geom.width = winrule->width;
+      }
+      else if(winrule->width > 0 && winrule->width <= 1){
+        client->geom.width = round(mon->m.width * winrule->width);
+      }
+      if(winrule->height > 1){
+        client->geom.height = winrule->height;
+      }
+      else if(winrule->height > 0 && winrule->height <= 1){
+        client->geom.height = round(mon->m.height * winrule->height);
+      }
+
+      if(winrule->offsetx != 0 || winrule->offsety != 0){
+        client->geom.x = mon->m.x + (mon->m.width  / 2) - (client->geom.width  / 2) + winrule->offsetx;
+        client->geom.y = mon->m.y + (mon->m.height / 2) - (client->geom.height / 2) + winrule->offsety;
+      }
+    }
+  }
+  client->isfloating |= client_is_float_type(client);
+  sendtomon(client, mon);
+
+  if(client->scene_tree){
+    resize(client, client->geom);
+  }
+
+  if(client->isfullscreen){
+    setfullscreen(client, 1);
+  }
+}
 
 // from dwl
 bool keybinding(uint32_t mods, xkb_keysym_t sym)
@@ -1593,9 +1688,11 @@ void processcursormotion(uint32_t time){
   struct Client *client = clientat(cursor->x, cursor->y);
   if(!client){
     wlr_cursor_set_xcursor(cursor, cursor_manager, "default");
+    /*
     if(seat->pointer_state.focused_surface){
       wlr_seat_pointer_clear_focus(seat);
-    }
+    } // i believe this is bad and should be removed
+    */
     if(active_constraint){
       wlr_pointer_constraint_v1_send_deactivated(active_constraint);
       active_constraint = NULL;
@@ -1853,6 +1950,7 @@ void mapnotify(struct wl_listener *listener, void *data){
   }
 
   wl_list_insert(&clients, &client->link);
+  applyrules(client);
   focused_client = client;
   setfocus(client);
 }
@@ -1889,7 +1987,8 @@ void unmapnotify(struct wl_listener *listener, void *data){
 void commitnotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, commit);
   if(client->surface.xdg->initial_commit){
-    wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, 0, 0);
+    applyrules(client);
+    wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, client->geom.width, client->geom.height);
   } 
   else{
     struct wlr_box old_geom = client->geom;
@@ -2196,7 +2295,7 @@ void init(){
 
   wlr_log_init(WLR_DEBUG, NULL);  
   server->display = wl_display_create();
-  if(!(server->wlr_backend = wlr_backend_autocreate(wl_display_get_event_loop(server->display), NULL))){
+  if(!(server->wlr_backend = wlr_backend_autocreate(wl_display_get_event_loop(server->display), &session))){
     printf("couldnt create backend\n");
     exit(1);
   }

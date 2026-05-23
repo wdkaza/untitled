@@ -33,6 +33,18 @@ typedef struct{
 } MonitorRule;
 
 typedef struct{
+  const char *appid;
+  const char *title;
+  int32_t floating;
+  int32_t fullscreen;
+  int32_t offsetx;
+  int32_t offsety;
+  int32_t height;
+  int32_t width;
+  char *monitor;
+} WinRule;
+
+typedef struct{
   //keyboard;
   uint32_t repeat_rate;
   uint32_t repeat_delay;
@@ -57,6 +69,8 @@ typedef struct{
   uint32_t key_bind_count;
   MouseBinding *mouse_bindings;
   uint32_t mouse_bind_count;
+  WinRule *win_rules;
+  uint32_t win_rule_count;
   MonitorRule *mon_rules;
   uint32_t mon_rule_count;
   char **exec;
@@ -70,6 +84,17 @@ typedef struct{
   float unfocusedcolor[4];
   float fullscreencolor[4];
 } Config;
+
+#define CHVT(n)                           \
+{                                         \
+    WLR_MODIFIER_CTRL | WLR_MODIFIER_ALT, \
+    XKB_KEY_XF86Switch_VT_##n,            \
+    chvt,                                 \
+    { .ui = (n) }                         \
+}
+
+KeyBinding default_key_bindings[] = {CHVT(1), CHVT(2), CHVT(3), CHVT(4), CHVT(5), CHVT(6),
+                                     CHVT(7), CHVT(8), CHVT(9), CHVT(10), CHVT(11), CHVT(12)};
 
 typedef void (*FuncType)(const Arg *);
 Config config;
@@ -171,6 +196,19 @@ uint32_t cfgparsemod(char *mod_str){
     token = strtok_r(NULL, "+", &saveptr);
   }
   return mod;
+}
+
+void cfgsetdefaultkeybindings(Config *config){
+  size_t default_key_bindings_count = sizeof(default_key_bindings) / sizeof(KeyBinding);
+
+  config->key_bindings = realloc(config->key_bindings, (config->key_bind_count + default_key_bindings_count) * sizeof(KeyBinding));
+  if(!config->key_bindings) return;
+
+  for(size_t i = 0; i < default_key_bindings_count; i++){
+    config->key_bindings[config->key_bind_count + i] = default_key_bindings[i];
+  }
+
+  config->key_bind_count += default_key_bindings_count;
 }
 
 uint32_t cfgparsetransform(const char *str){
@@ -504,6 +542,71 @@ void cfgparseoption(Config *config, char *key, char *value){
 
     config->mon_rule_count++;
   }
+  else if(strcmp(key, "winrule") == 0){
+    config->win_rules = realloc(config->win_rules, (config->win_rule_count + 1) * sizeof(WinRule));
+    if(!config->win_rules){
+      fprintf(stderr, "Failed to alloc memory for winrules;\n");
+      return;
+    }
+
+    WinRule *rule = &config->win_rules[config->win_rule_count];
+    memset(rule, 0, sizeof(WinRule));
+
+    rule->offsetx = 0;
+    rule->offsety = 0;
+    rule->width = 0;
+    rule->height = 0;
+    rule->monitor = NULL;
+    rule->appid = NULL;
+    rule->title = NULL;
+
+    char *token = strtok(value, ",");
+    while(token != NULL){
+      char *colon = strchr(token, ':');
+      if(colon != NULL){
+        *colon = '\0';
+        char *key = token;
+        char *val = colon + 1;
+
+        cfgtrim(key);
+        cfgtrim(val);
+
+        if(strcmp(key, "floating") == 0){
+          rule->floating = atoi(val);
+        }
+        else if(strcmp(key, "fullscreen") == 0){
+          rule->fullscreen = atoi(val);
+        }
+        else if(strcmp(key, "offsetx") == 0){
+          rule->offsetx = atoi(val);
+        }
+        else if(strcmp(key, "offsety") == 0){
+          rule->offsety = atoi(val);
+        }
+        else if(strcmp(key, "title") == 0){
+          rule->title = strdup(val);
+        }
+        else if(strcmp(key, "appid") == 0){
+          rule->appid = strdup(val);
+        }
+        else if(strcmp(key, "width") == 0){
+          rule->width = atoi(val);
+        }
+        else if(strcmp(key, "height") == 0){
+          rule->height = atoi(val);
+        }
+        else if(strcmp(key, "monitor") == 0){
+          rule->monitor = strdup(val);
+        }
+        else{
+          fprintf(stderr, "Invalid winrule bind format: %s\n");
+          return;
+        }
+        token = strtok(NULL, ",");
+      }
+    }
+    config->win_rule_count++;
+  }
 }
 
 void cfgparseline(Config *config, char *line){
@@ -536,6 +639,7 @@ void cfgparsefile(Config *config, const char *file_path){
     }
     cfgparseline(config, line);
   }
+  cfgsetdefaultkeybindings(config);
 
   fclose(file);
 }

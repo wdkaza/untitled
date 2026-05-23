@@ -37,6 +37,25 @@ static inline int client_is_unmanaged(struct Client *c){
 	return 0;
 }
 
+static inline const char *
+client_get_appid(struct Client *c)
+{
+#ifdef XWAYLAND
+	if (client_is_x11(c))
+		return c->surface.xwayland->class ? c->surface.xwayland->class : "broken";
+#endif
+	return c->surface.xdg->toplevel->app_id ? c->surface.xdg->toplevel->app_id : "broken";
+}
+
+static inline const char *
+client_get_title(struct Client *c)
+{
+#ifdef XWAYLAND
+	if (client_is_x11(c))
+		return c->surface.xwayland->title ? c->surface.xwayland->title : "broken";
+#endif
+	return c->surface.xdg->toplevel->title ? c->surface.xdg->toplevel->title : "broken";
+}
 
 static inline void client_get_geometry(struct Client *client, struct wlr_box *geom){
 #ifdef XWAYLAND
@@ -143,6 +162,59 @@ static inline void client_get_clip(struct Client *client, struct wlr_box *clip){
 	clip->x = client->surface.xdg->geometry.x;
 	clip->y = client->surface.xdg->geometry.y;
 }
+
+
+
+static inline int
+client_is_float_type(struct Client *c)
+{
+	struct wlr_xdg_toplevel *toplevel;
+	struct wlr_xdg_toplevel_state state;
+
+#ifdef XWAYLAND
+	if (client_is_x11(c)) {
+		struct wlr_xwayland_surface *surface = c->surface.xwayland;
+		xcb_size_hints_t *size_hints = surface->size_hints;
+		if (surface->modal)
+			return 1;
+
+		if (wlr_xwayland_surface_has_window_type(surface, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DIALOG)
+				|| wlr_xwayland_surface_has_window_type(surface, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_SPLASH)
+				|| wlr_xwayland_surface_has_window_type(surface, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLBAR)
+				|| wlr_xwayland_surface_has_window_type(surface, WLR_XWAYLAND_NET_WM_WINDOW_TYPE_UTILITY)) {
+			return 1;
+		}
+
+		return size_hints && size_hints->min_width > 0 && size_hints->min_height > 0
+			&& (size_hints->max_width == size_hints->min_width
+				|| size_hints->max_height == size_hints->min_height);
+	}
+#endif
+
+	toplevel = c->surface.xdg->toplevel;
+	state = toplevel->current;
+	return toplevel->parent || (state.min_width != 0 && state.min_height != 0
+		&& (state.min_width == state.max_width
+			|| state.min_height == state.max_height));
+}
+
+static inline struct Client *
+client_get_parent(struct Client *c)
+{
+	struct Client *p = NULL;
+#ifdef XWAYLAND
+	if (client_is_x11(c)) {
+		if (c->surface.xwayland->parent)
+			toplevel_from_wlr_surface(c->surface.xwayland->parent->surface, &p, NULL);
+		return p;
+	}
+#endif
+	if (c->surface.xdg->toplevel->parent)
+		toplevel_from_wlr_surface(c->surface.xdg->toplevel->parent->base->surface, &p, NULL);
+	return p;
+}
+
+
 
 static inline void client_notify_enter(struct wlr_surface *s, struct wlr_keyboard *kb){
   if(kb){

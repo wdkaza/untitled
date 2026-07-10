@@ -64,7 +64,6 @@ typedef struct{
   uint32_t disable_while_typing;
   uint32_t left_handed;
   uint32_t middle_button_emulation;
-  //
   KeyBinding *key_bindings; 
   uint32_t key_bind_count;
   MouseBinding *mouse_bindings;

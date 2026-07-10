@@ -1,5 +1,4 @@
 #include "pixman.h"
-#include "render/gles2.h"
 #include <bits/time.h>
 #include <getopt.h>
 #include <libinput.h>
@@ -89,7 +88,7 @@ enum { UP, DOWN, LEFT, RIGHT };
 #include "monitor.h"
 
 struct Monitor;
-struct mw_renderer;
+struct srRenderer;
 struct Client{
   unsigned int type;
   struct wl_list link;
@@ -228,9 +227,9 @@ static void powermanagersetmode(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void applyrule(struct Client *client);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
-static void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
-static void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy);
-static void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy);
+static void renderlayer(struct srRenderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
+static void renderpopups(struct srRenderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy);
+static void rendersurface(struct srRenderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfullscreen(struct Client *client, int fullscreen);
@@ -354,9 +353,10 @@ static struct Client *focused_client; // dont know if i should keep it,
 
 
 #include "server.h"
-#include "renderer.h"
 #include "config.h"
+#include "renderer.h"
 #include "client.h"
+
 void cyclefocus(const Arg *arg){
   if(wl_list_length(&clients) < 2) return;
   struct Client *next_client = wl_container_of(clients.prev, next_client, link);
@@ -364,17 +364,7 @@ void cyclefocus(const Arg *arg){
 }
 
 void changedesktop(const Arg *arg){
-  current_desktop = arg->i;
-  struct Client *client;
-  wl_list_for_each(client, &clients, link){
-    if(client->desktop_index == current_desktop && client->surface.xdg->surface->mapped){ // sedcond statement might be USELESS!!!!!
-      wlr_scene_node_set_enabled(&client->scene_tree->node, true);
-    }
-    else{
-      wlr_scene_node_set_enabled(&client->scene_tree->node, false);
-    }
-  }
-  //arrange();
+  return;
 }
 
 void exitwm(const Arg *arg){
@@ -1008,7 +998,7 @@ void newdecoration(struct wl_listener *listener, void *data){
   wl_signal_add(&client->decoration->events.destroy, &client->decoration_destroy);
 }
 
-void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_list *layer_list){
+void renderlayer(struct srRenderer *renderer, struct Monitor *mon, struct wl_list *layer_list){
   struct LayerSurface *layer;
   wl_list_for_each(layer, layer_list, link){
     struct wlr_surface *surface = layer->layer_surface->surface;
@@ -1026,12 +1016,12 @@ void renderlayer(struct mw_renderer *renderer, struct Monitor *mon, struct wl_li
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
 
-    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0, 0.0f);
+    srRenderTextureAt(renderer, surface, texture, &box, 1.0f, 1.0f, config.border_radius);
     pixman_region32_fini(&damage);
   }
 }
 
-void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
+void rendersurface(struct srRenderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy){
   struct wlr_subsurface *subsurface;
   wl_list_for_each(subsurface, &surface->current.subsurfaces_below, current.link){
     rendersurface(renderer, mon, subsurface->surface, sx + subsurface->current.x, sy + subsurface->current.y);
@@ -1049,7 +1039,7 @@ void rendersurface(struct mw_renderer *renderer, struct Monitor *mon, struct wlr
     pixman_region32_t damage;
     pixman_region32_init(&damage);
     pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
-    mw_renderer_render_texture_at(renderer, &damage, surface, texture, &box, 1.0, config.border_radius); // corner_radius here
+    srRenderTextureAt(renderer, surface, texture, &box, 1.0f, 1.0f, config.border_radius);
     pixman_region32_fini(&damage);
   }
 
@@ -1063,7 +1053,7 @@ void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data){
   wlr_surface_send_frame_done(surface, now);
 }
 
-void renderpopups(struct mw_renderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy){
+void renderpopups(struct srRenderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy){
   struct wlr_xdg_popup *popup;
   wl_list_for_each(popup, &xdg->popups, link){
     if(!popup->base->surface->mapped) continue;
@@ -1084,16 +1074,16 @@ void rendermon(struct wl_listener *listener, void *data){
 
   //glClearColor(0.0, 0.0, 0.0, 1.0);
   //glClear(GL_COLOR_BUFFER_BIT);
-  mw_renderer_begin(server->mw_renderer, mon);
+  srBegin(server->sr_renderer, mon);
   float color[4] = {0.0, 0.0, 0.0, 1.0}; // tempoarry
   struct wlr_render_rect_options rect = {
     .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
     .color = {.r = color[0], .g = color[1], .b = color[2], .a = color[3]},
   };
-  wlr_render_pass_add_rect(server->mw_renderer->pass, &rect);
+  wlr_render_pass_add_rect(server->sr_renderer->wlr.pass, &rect);
 
-  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]);
-  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
+  renderlayer(server->sr_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND]);
+  renderlayer(server->sr_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_BOTTOM]);
 
   struct Client *client;
   wl_list_for_each_reverse(client, &clients, link){// reverse to fix the z order/stacking whatever you call it
@@ -1102,7 +1092,7 @@ void rendermon(struct wl_listener *listener, void *data){
         .box = {.x = 0, .y = 0, .width = mon->wlr_output->width, .height = mon->wlr_output->height},
         .color = {.r = config.fullscreencolor[0], .g = config.fullscreencolor[1], .b = config.fullscreencolor[2], .a = config.fullscreencolor[3]},
       };
-      wlr_render_pass_add_rect(server->mw_renderer->pass, &background_rect);
+      wlr_render_pass_add_rect(server->sr_renderer->wlr.pass, &background_rect);
     }
     struct wlr_surface *surface = NULL;
     struct wlr_texture *texture = NULL;
@@ -1118,28 +1108,28 @@ void rendermon(struct wl_listener *listener, void *data){
       sy -= client->surface.xdg->current.geometry.y;
     }
 
-    rendersurface(server->mw_renderer, mon, surface, sx, sy);
+    rendersurface(server->sr_renderer, mon, surface, sx, sy);
 
     if(client->type == XDGShell){
-      renderpopups(server->mw_renderer, mon, client->surface.xdg, sx, sy);
+      renderpopups(server->sr_renderer, mon, client->surface.xdg, sx, sy);
     }
   }
 
-  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
-  renderlayer(server->mw_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]);
+  renderlayer(server->sr_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_TOP]);
+  renderlayer(server->sr_renderer, mon, &mon->layers[ZWLR_LAYER_SHELL_V1_LAYER_OVERLAY]);
 
   
   if(seat->drag && seat->drag->icon && seat->drag->icon->surface->mapped){
     struct wlr_drag_icon *icon = seat->drag->icon;
     int sx = (int)cursor->x; // BUG : somewhere here with drag icon
     int sy = (int)cursor->y;
-    rendersurface(server->mw_renderer, mon, icon->surface, sx, sy);
+    rendersurface(server->sr_renderer, mon, icon->surface, sx, sy);
   }
 
   pixman_region32_t damage;
   pixman_region32_init(&damage);
   pixman_region32_union_rect(&damage, &damage, 0,0 , mon->wlr_output->width, mon->wlr_output->height);
-  mw_renderer_end(server->mw_renderer, &damage, mon);
+  srEnd(server->sr_renderer, mon);
   pixman_region32_fini(&damage);
 
   struct timespec now;
@@ -1218,7 +1208,7 @@ void createmon(struct wl_listener *listener, void *data){
   mon->m.y = -1;
   mon->asleep = 0;
 
-  mw_renderer_init_output(server->mw_renderer, mon);
+  wlr_output_init_render(mon->wlr_output, server->sr_renderer->info.server->wlr_allocator, server->sr_renderer->wlr.renderer);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
 
   wlr_output_state_init(&state);
@@ -1344,15 +1334,6 @@ void applyrules(struct Client *client){
   if(!client) return;
 
   parent = client_get_parent(client);
-  mon = parent && parent->mon ? parent->mon : current_monitor;
-  client->isfloating = client_is_float_type(client) || parent;
-
-#ifdef XWAYLAND
-  if(client->isfloating && client_is_x11(client)){
-    client->geom = client->geom;
-  }
-#endif
-
   mon = parent && parent->mon ? parent->mon : current_monitor;
   client->isfloating = client_is_float_type(client) || parent;
   appid = client_get_appid(client);
@@ -1817,16 +1798,11 @@ void moveresize(const Arg *arg){
 
 void cursorbutton(struct wl_listener *listener, void *data){
   struct wlr_pointer_button_event *event = data;
-  struct wlr_keyboard *keyboard;
-  uint32_t mods;
 
   switch(event->state){
   case WL_POINTER_BUTTON_STATE_PRESSED:{
     struct wlr_keyboard *keyboard = wlr_seat_get_keyboard(seat);
     uint32_t mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
-
-    keyboard = wlr_seat_get_keyboard(seat);
-    mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
     for(uint32_t i = 0;i < config.mouse_bind_count; i++){
       MouseBinding *m = &config.mouse_bindings[i];
       if(CLEANMASK(mods) == CLEANMASK(m->mod) && event->button == m->button && m->func){
@@ -2305,8 +2281,8 @@ void init(){
     exit(1);
   }
 
-  server->mw_renderer = calloc(1, sizeof(*server->mw_renderer));
-  mw_renderer_init(server->mw_renderer, server);
+  server->sr_renderer = calloc(1, sizeof(*server->sr_renderer));
+  srInit(server->sr_renderer, server);
 
   scene = wlr_scene_create();
   wlr_renderer_init_wl_display(server->wlr_renderer, server->display);
@@ -2386,7 +2362,7 @@ void init(){
   wl_signal_add(&cursor->events.motion, &cursor_motion);
   wl_signal_add(&cursor->events.motion_absolute, &cursor_motion_absolute);
 
-  decoration_manager = wlr_xdg_decoration_manager_v1_create(server->display);
+  decoration_manager = wlr_xdg_decoration_manager_v1_create(server->display, 1);
   wl_signal_add(&decoration_manager->events.new_toplevel_decoration, &new_decoration);
 
 	pointer_constraints = wlr_pointer_constraints_v1_create(server->display);
@@ -2456,13 +2432,12 @@ void quit(){
 
   wlr_scene_node_destroy(&scene->tree.node);
   
-  mw_renderer_destroy(server->mw_renderer);
-  free(server->mw_renderer);
+  wlr_renderer_destroy(server->sr_renderer->wlr.renderer);
+  free(server->sr_renderer);
 
   wlr_allocator_destroy(server->wlr_allocator);
   wlr_backend_destroy(server->wlr_backend);
 
-  wlr_scene_node_destroy(&scene->tree.node);
   wl_display_destroy(server->display);
   free(server);
   server = NULL;

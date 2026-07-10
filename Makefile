@@ -11,7 +11,7 @@ CFLAGS_PKG_CONFIG += -I$(WLROOTS_BUILD)
 CFLAGS_PKG_CONFIG += -I$(WLROOTS_BUILD)/protocol
 CFLAGS_PKG_CONFIG += -I/usr/include/pixman-1
 CFLAGS_PKG_CONFIG += -I/home/wdkaza/packages/wlroots/build/include
-LIBS = $(shell $(PKG_CONFIG) --libs $(PKGS) xcb-icccm) -lGLESv2 -lwlroots-0.20 -lpixman-1
+LIBS = $(shell $(PKG_CONFIG) --libs $(PKGS) xcb-icccm) -lGLESv2 -lwlroots-0.21 -lpixman-1
 LDFLAGS += -L$(WLROOTS_BUILD) -Wl,-rpath,$(WLROOTS_BUILD)
 
 ASAN ?= 1

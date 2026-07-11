@@ -15,6 +15,8 @@ struct Monitor{
 
   struct wlr_box m; // monitor area
   struct wlr_box w; // windows area
+
+  struct wlr_damage_ring dring;
   
   double canvas_x, canvas_y;
 

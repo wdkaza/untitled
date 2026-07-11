@@ -10,7 +10,9 @@
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/render/gles2.h>
+#include <wlr/render/swapchain.h>
 #include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_damage_ring.h>
 #include <wlr/util/transform.h>
 #include <pixman.h>
 
@@ -148,6 +150,7 @@ struct srRenderer {
     struct wlr_renderer *renderer;
     struct wlr_render_pass *pass;
     struct wlr_output_state state;
+    pixman_region32_t damage;
   } wlr;
   struct srInfo{
     struct Server *server;

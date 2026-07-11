@@ -230,6 +230,8 @@ static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
 static void renderlayer(struct srRenderer *renderer, struct Monitor *mon, struct wl_list *layer_list);
 static void renderpopups(struct srRenderer *renderer, struct Monitor *mon, struct wlr_xdg_surface *xdg, int sx, int sy);
 static void rendersurface(struct srRenderer *renderer, struct Monitor *mon, struct wlr_surface *surface, int sx, int sy);
+static void damagebox(struct Monitor *mon, struct wlr_box box);
+static void damagemon(struct Monitor *mon);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void destroylayersurfacenotify(struct wl_listener *listener, void *data);
 static void setfullscreen(struct Client *client, int fullscreen);
@@ -241,6 +243,7 @@ static void commitpopup(struct wl_listener *listener, void *data);
 static void createpointerconstraint(struct wl_listener *listener, void *data);
 static void cursorconstrain(struct wlr_pointer_constraint_v1 *constraint);
 static void destroypointerconstraint(struct wl_listener *listener, void *data);
+static void damagecursor(void);
 static void cursorwarptohint(void);
 static void urgent(struct wl_listener *listener, void *data);
 static void sendframedone(struct wlr_surface *surface, int sx, int sy, void *data);
@@ -880,7 +883,14 @@ void commitlayersurfacenotify(struct wl_listener *listener, void *data){
     return;
   }
 
-  if(layer_surface->current.committed == 0 && layer->mapped == layer_surface->surface->mapped) return;
+  if(layer_surface->current.committed == 0 && layer->mapped == layer_surface->surface->mapped){
+    struct wlr_box box = {.x = layer->scene_tree->node.x,
+                          .y = layer->scene_tree->node.y,
+                          .width = layer->layer_surface->surface->current.width,
+                          .height = layer->layer_surface->surface->current.height};
+    damagebox(layer->mon, box);
+    return;
+  }
 
   layer->mapped = layer_surface->surface->mapped;
   wlr_scene_node_set_enabled(&layer->scene_tree->node, layer->mapped);
@@ -898,6 +908,12 @@ void commitlayersurfacenotify(struct wl_listener *listener, void *data){
 
 void unmaplayersurfacenotify(struct wl_listener *listener, void *data){
   struct LayerSurface *layer = wl_container_of(listener, layer, unmap);
+
+  struct wlr_box box = {.x = layer->scene_tree->node.x,
+                        .y = layer->scene_tree->node.y,
+                        .width = layer->layer_surface->surface->current.width,
+                        .height = layer->layer_surface->surface->current.height};
+  damagebox(layer->mon, box);
 
   layer->mapped = 0;
   wlr_scene_node_set_enabled(&layer->scene_tree->node, 0);
@@ -970,6 +986,7 @@ void seatrequestcursor(struct wl_listener *listener, void *data){
   struct wlr_seat_client *focused_client = seat->pointer_state.focused_client;
   if(focused_client == event->seat_client){
     wlr_cursor_set_surface(cursor, event->surface, event->hotspot_x, event->hotspot_y);
+    damagecursor();
   }
 }
 
@@ -1012,12 +1029,7 @@ void renderlayer(struct srRenderer *renderer, struct Monitor *mon, struct wl_lis
       .height = surface->current.height
     };
 
-    pixman_region32_t damage;
-    pixman_region32_init(&damage);
-    pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
-
     srRenderTextureAt(renderer, surface, texture, &box, 1.0f, 1.0f, config.border_radius);
-    pixman_region32_fini(&damage);
   }
 }
 
@@ -1036,11 +1048,7 @@ void rendersurface(struct srRenderer *renderer, struct Monitor *mon, struct wlr_
       .height = surface->current.height,
     };
 
-    pixman_region32_t damage;
-    pixman_region32_init(&damage);
-    pixman_region32_union_rect(&damage, &damage, box.x, box.y, box.width, box.height);
     srRenderTextureAt(renderer, surface, texture, &box, 1.0f, 1.0f, config.border_radius);
-    pixman_region32_fini(&damage);
   }
 
   wl_list_for_each(subsurface, &surface->current.subsurfaces_above, current.link){
@@ -1071,6 +1079,12 @@ void rendermon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, frame);  
   if(mon->asleep) return;
   if(session && !session->active) return;
+
+  if(!pixman_region32_not_empty(&mon->dring.current)){
+    return;
+  }
+
+  wlr_log(WLR_INFO, "newframe");
 
   //glClearColor(0.0, 0.0, 0.0, 1.0);
   //glClear(GL_COLOR_BUFFER_BIT);
@@ -1126,11 +1140,7 @@ void rendermon(struct wl_listener *listener, void *data){
     rendersurface(server->sr_renderer, mon, icon->surface, sx, sy);
   }
 
-  pixman_region32_t damage;
-  pixman_region32_init(&damage);
-  pixman_region32_union_rect(&damage, &damage, 0,0 , mon->wlr_output->width, mon->wlr_output->height);
   srEnd(server->sr_renderer, mon);
-  pixman_region32_fini(&damage);
 
   struct timespec now;
   clock_gettime(CLOCK_MONOTONIC, &now);
@@ -1156,6 +1166,7 @@ void requeststatemon(struct wl_listener *listener, void *data){
   struct Monitor *mon = wl_container_of(listener, mon, request_state);
   struct wlr_output_event_request_state *event = data;
   wlr_output_commit_state(mon->wlr_output, event->state);
+  damagemon(mon);
 }
 
 void destroymon(struct wl_listener *listener, void *data){
@@ -1189,11 +1200,39 @@ void destroymon(struct wl_listener *listener, void *data){
   if(current_monitor == mon){
     current_monitor = newmon;
   }
+  wlr_damage_ring_finish(&mon->dring);
   wl_list_remove(&mon->request_state.link);
   wl_list_remove(&mon->frame.link);
   wl_list_remove(&mon->destroy.link);
   wl_list_remove(&mon->link);
   free(mon);
+}
+
+void damagebox(struct Monitor *mon, struct wlr_box box){
+  struct wlr_box lbox = box;
+  lbox.x -= mon->m.x;
+  lbox.y -= mon->m.y;
+  wlr_damage_ring_add_box(&mon->dring, &lbox);
+  wlr_output_schedule_frame(mon->wlr_output);
+}
+
+void damagemon(struct Monitor *mon){
+  wlr_damage_ring_add_whole(&mon->dring);
+  wlr_output_schedule_frame(mon->wlr_output);
+}
+
+void damagecursor(void){
+  uint32_t size = 24;
+  uint32_t pad = size;
+  float scale = current_monitor->wlr_output->scale;
+
+  struct wlr_box box = {
+    .x = (int)floor(cursor->x) - pad,
+    .y = (int)floor(cursor->y) - pad,
+    .width = (int)ceil(size * scale) + pad * 2,
+    .height = (int)ceil(size * scale) + pad * 2,
+  };
+  damagebox(current_monitor, box);
 }
 
 void createmon(struct wl_listener *listener, void *data){
@@ -1207,6 +1246,8 @@ void createmon(struct wl_listener *listener, void *data){
   mon->m.x = -1;
   mon->m.y = -1;
   mon->asleep = 0;
+
+  wlr_damage_ring_init(&mon->dring);
 
   wlr_output_init_render(mon->wlr_output, server->sr_renderer->info.server->wlr_allocator, server->sr_renderer->wlr.renderer);
   struct wlr_output_mode *mode = wlr_output_preferred_mode(wlr_output);
@@ -1229,6 +1270,8 @@ void createmon(struct wl_listener *listener, void *data){
   wlr_output_state_set_mode(&state, mode);
   wlr_output_commit_state(wlr_output, &state);
   wlr_output_state_finish(&state);
+
+  damagemon(mon);
 
   wlr_output->data = mon;
   mon->scene_output = wlr_scene_output_create(scene, mon->wlr_output);
@@ -1565,18 +1608,21 @@ void cursormove(){
 void cursorresize(){
   if(gclient == NULL) return;
   struct Client *client = gclient;
-  int new_width = cursor->x - client->scene_tree->node.x;
-  int new_height = cursor->y - client->scene_tree->node.y;
-  if(new_width < 50 || new_height < 50) return;
+  struct wlr_box box;
+  box.x = client->scene_tree->node.x;
+  box.y = client->scene_tree->node.y;
+  box.width = cursor->x - client->scene_tree->node.x;
+  box.height = cursor->y - client->scene_tree->node.y;
+  if(box.width < 50 || box.height < 50) return;
 #ifdef XWAYLAND
   if(client->type == X11){
     if(client->surface.xwayland){
-    wlr_xwayland_surface_configure(client->surface.xwayland, client->scene_tree->node.x, client->scene_tree->node.y, new_width, new_height);
+    wlr_xwayland_surface_configure(client->surface.xwayland, client->scene_tree->node.x, client->scene_tree->node.y, box.width, box.height);
       return;
     }
   }
 #endif
-  wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, new_width, new_height);
+  resize(client, box);
 }
 
 struct Client *clientat(double x, double y){
@@ -1628,6 +1674,8 @@ void processcursormotion(uint32_t time){
       break;
     }
   }
+
+  damagecursor();
 
   if(cursor_mode == CursorMove){
     cursormove();
@@ -1746,6 +1794,9 @@ void cursormotion(struct wl_listener *listener, void *data){
 
 void cursormotionabsolute(struct wl_listener *listener, void *data){
   struct wlr_pointer_motion_absolute_event *event = data;
+  if(active_constraint && active_constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED && active_constraint->surface == seat->pointer_state.focused_surface){
+    return;
+  }
   wlr_cursor_warp_absolute(cursor, &event->pointer->base, event->x, event->y);
   processcursormotion(event->time_msec);
 }
@@ -1918,6 +1969,8 @@ void mapnotify(struct wl_listener *listener, void *data){
     client->border[i]->node.data = client;
   }
 
+  damagebox(client->mon, client->geom);
+
   if(!client_is_unmanaged(client) && client->type != XDGShell){
     struct Client *window;
     wl_list_for_each(window, &clients, link){
@@ -1933,6 +1986,7 @@ void mapnotify(struct wl_listener *listener, void *data){
 
 void unmapnotify(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, unmap);
+  damagebox(client->mon, client->geom);
   if(client == focused_client){
     focused_client = NULL;
   }
@@ -1970,6 +2024,8 @@ void commitnotify(struct wl_listener *listener, void *data){
     struct wlr_box old_geom = client->geom;
     struct wlr_box new_geom;
     client_get_geometry(client, &new_geom);
+    damagebox(client->mon, old_geom);
+    damagebox(client->mon, new_geom);
     client->geom.width = new_geom.width;
     client->geom.height = new_geom.height;
   }
@@ -2031,7 +2087,9 @@ void resize(struct Client *client, struct wlr_box geo){
     return;
   }
 
+  damagebox(client->mon, client->geom);
   client->geom = geo;
+  damagebox(client->mon, client->geom);
 
 	wlr_scene_node_set_position(&client->scene_tree->node, client->geom.x, client->geom.y);
 	wlr_scene_node_set_position(&client->scene_surface->node, client->bw, client->bw);

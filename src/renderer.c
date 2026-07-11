@@ -1,6 +1,8 @@
 #include "renderer.h"
+#include "monitor.h"
 #include "render/gles2.h"
 #include "util/matrix.h"
+#include "wlr/render/swapchain.h"
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <wayland-server-protocol.h>
@@ -282,9 +284,23 @@ void srRenderTextureAt(struct srRenderer *renderer, struct wlr_surface *surface,
 }
 
 void srBegin(struct srRenderer *renderer, struct Monitor *output){
+  struct wlr_buffer *swapbuf;
   renderer->info.monitor = output;
   wlr_output_state_init(&renderer->wlr.state);
-  renderer->wlr.pass = wlr_output_begin_render_pass(output->wlr_output, &renderer->wlr.state, NULL);
+  renderer->wlr.pass = NULL;
+
+  wlr_output_configure_primary_swapchain(output->wlr_output, &renderer->wlr.state, &output->wlr_output->swapchain);
+  swapbuf = wlr_swapchain_acquire(output->wlr_output->swapchain); 
+
+  pixman_region32_init(&renderer->wlr.damage);
+  wlr_damage_ring_rotate_buffer(&output->dring, swapbuf, &renderer->wlr.damage);
+
+  renderer->wlr.pass = wlr_renderer_begin_buffer_pass(renderer->wlr.renderer, swapbuf, NULL);
+
+  wlr_output_state_set_buffer(&renderer->wlr.state, swapbuf);
+  wlr_buffer_unlock(swapbuf);
+
+
   if(!renderer->info.shaders_compiled){
     // will fire in the future if shaders would need to be recompiled
     return;
@@ -293,10 +309,15 @@ void srBegin(struct srRenderer *renderer, struct Monitor *output){
 
 void srEnd(struct srRenderer *renderer, struct Monitor *output){
   if(renderer->wlr.pass){
-    wlr_output_add_software_cursors_to_render_pass(output->wlr_output, renderer->wlr.pass, NULL); // damage
+    wlr_output_add_software_cursors_to_render_pass(output->wlr_output, renderer->wlr.pass, NULL);
     wlr_render_pass_submit(renderer->wlr.pass);
+    wlr_output_state_set_damage(&renderer->wlr.state, &renderer->wlr.damage);
+    pixman_region32_fini(&renderer->wlr.damage);
   }
-  wlr_output_commit_state(output->wlr_output, &renderer->wlr.state);
+
+  if(!wlr_output_commit_state(output->wlr_output, &renderer->wlr.state)){
+    wlr_damage_ring_add_whole(&output->dring);
+  }
   wlr_output_state_finish(&renderer->wlr.state);
   renderer->wlr.pass = NULL;
   renderer->info.monitor = NULL;

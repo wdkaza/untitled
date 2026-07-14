@@ -199,6 +199,11 @@ struct PointerConstraint{
   struct wl_listener destroy;
 };
 
+struct Surface{
+  struct wl_listener commit;
+  struct wl_listener destroy;
+};
+
 static void cursormotion(struct wl_listener *listener, void *data);
 static void seatsetselection(struct wl_listener *listener, void *data);
 static void seatrequestcursor(struct wl_listener *listener, void *data);
@@ -224,6 +229,9 @@ static void startdrag(struct wl_listener *listener, void *data);
 static void requeststartdrag(struct wl_listener *listener, void *data);
 static void destroydragicon(struct wl_listener *listener, void *data);
 static void powermanagersetmode(struct wl_listener *listener, void *data);
+static void newwlrsurface(struct wl_listener *listener, void *data);
+static void surfacecommit(struct wl_listener *listener, void *data);
+static void surfacedestroy(struct wl_listener *listener, void *data);
 static void arrangelayers(struct Monitor *mon);
 static void applyrule(struct Client *client);
 static void commitlayersurfacenotify(struct wl_listener *listener, void *data);
@@ -287,6 +295,7 @@ static struct wlr_xwayland *xwayland;
 #endif
 
 static struct wl_listener new_layer_surface = {.notify = newlayersurface};
+static struct wl_listener new_wlr_surface = {.notify = newwlrsurface};
 static struct wl_listener cursor_motion = {.notify = cursormotion};
 static struct wl_listener cursor_motion_absolute = {.notify = cursormotionabsolute};
 static struct wl_listener cursor_axis = {.notify = cursoraxis};
@@ -2019,16 +2028,20 @@ void commitnotify(struct wl_listener *listener, void *data){
   if(client->surface.xdg->initial_commit){
     applyrules(client);
     wlr_xdg_toplevel_set_size(client->surface.xdg->toplevel, client->geom.width, client->geom.height);
+    return;
   } 
-  else{
-    struct wlr_box old_geom = client->geom;
-    struct wlr_box new_geom;
-    client_get_geometry(client, &new_geom);
-    damagebox(client->mon, old_geom);
-    damagebox(client->mon, new_geom);
-    client->geom.width = new_geom.width;
-    client->geom.height = new_geom.height;
-  }
+
+  struct wlr_box old_geom = client->geom;
+  struct wlr_box new_geom;
+  client_get_geometry(client, &new_geom);
+
+  damagebox(client->mon, old_geom);
+  damagebox(client->mon, new_geom);
+
+  client->geom.x = new_geom.x;
+  client->geom.y = new_geom.y;
+  client->geom.width = new_geom.width;
+  client->geom.height = new_geom.height;
 }
 
 void destroynotify(struct wl_listener *listener, void *data){
@@ -2161,6 +2174,54 @@ void commitpopup(struct wl_listener *listener, void *data){
 	free(listener);
 }
 
+void newwlrsurface(struct wl_listener *listener, void *data){
+  struct wlr_surface *surface = data;
+  struct Surface *wlr_surface = calloc(1, sizeof(*wlr_surface));
+
+  wlr_surface->commit.notify = surfacecommit;
+  wl_signal_add(&surface->events.commit, &wlr_surface->commit);
+  wlr_surface->destroy.notify = surfacedestroy;
+  wl_signal_add(&surface->events.destroy, &wlr_surface->destroy);
+}
+
+void surfacedestroy(struct wl_listener *listener, void *data){
+  struct Surface *wlr_surface = wl_container_of(listener, wlr_surface, destroy);
+  wl_list_remove(&wlr_surface->commit.link);
+  wl_list_remove(&wlr_surface->destroy.link);
+  free(wlr_surface);
+}
+
+void surfacecommit(struct wl_listener *listener, void *data){
+  struct wlr_surface *surface = data;
+  struct Client *client = NULL;
+  struct LayerSurface *layer = NULL;
+  toplevel_from_wlr_surface(surface, &client, &layer);
+
+  if(client){
+    if(client_surface(client) == surface){
+      return;
+    }
+    damagebox(client->mon, client->geom);
+    return;
+  }
+
+  if(layer){
+    if(!layer->mon || !layer->scene_tree){
+      return;
+    }
+    if(layer->layer_surface->surface == surface){
+      return;
+    }
+
+    struct wlr_box box = {.x = layer->scene_tree->node.x,
+                          .y = layer->scene_tree->node.y,
+                          .width = layer->layer_surface->surface->current.width,
+                          .height = layer->layer_surface->surface->current.height};
+    damagebox(layer->mon, box);
+    return;
+  }
+}
+
 void newclient(struct wl_listener *listener, void *data){
   struct wlr_xdg_toplevel *toplevel = data;
   struct Client *client;
@@ -2219,12 +2280,15 @@ void associatex11(struct wl_listener *listener, void *data){
   wl_signal_add(&client->surface.xwayland->surface->events.map, &client->map);
   client->unmap.notify = unmapnotify;
   wl_signal_add(&client->surface.xwayland->surface->events.unmap, &client->unmap);
+  client->commit.notify = commitnotify;
+  wl_signal_add(&client->surface.xwayland->surface->events.commit, &client->commit);
 }
 
 void dissociatex11(struct wl_listener *listener, void *data){
   struct Client *client = wl_container_of(listener, client, dissociate);
   wl_list_remove(&client->map.link);
   wl_list_remove(&client->unmap.link);
+  wl_list_remove(&client->commit.link);
 }
 
 void configurex11(struct wl_listener *listener, void *data){
@@ -2358,6 +2422,7 @@ void init(){
   }
 
   compositor = wlr_compositor_create(server->display, 6, server->wlr_renderer);
+  wl_signal_add(&compositor->events.new_surface, &new_wlr_surface);
   // TODO : protocols setup here
   wlr_subcompositor_create(server->display);
 	wlr_single_pixel_buffer_manager_v1_create(server->display);
@@ -2522,6 +2587,7 @@ void destroylisteners(){
   wl_list_remove(&new_client.link);
   wl_list_remove(&new_popup.link);
   wl_list_remove(&new_layer_surface.link);
+  wl_list_remove(&new_wlr_surface.link);
   wl_list_remove(&new_decoration.link);
 #ifdef XWAYLAND
   wl_list_remove(&xwayland_ready.link);

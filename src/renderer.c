@@ -317,6 +317,7 @@ void srEnd(struct srRenderer *renderer, struct Monitor *output){
 
   if(!wlr_output_commit_state(output->wlr_output, &renderer->wlr.state)){
     wlr_damage_ring_add_whole(&output->dring);
+    wlr_output_schedule_frame(output->wlr_output);
   }
   wlr_output_state_finish(&renderer->wlr.state);
   renderer->wlr.pass = NULL;
